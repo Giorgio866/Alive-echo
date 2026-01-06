@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HA Keep Alive</title>
+    <style>
+        body { 
+            background-color: #000000; 
+            color: #333; 
+            font-family: sans-serif; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        p { font-size: 12px; color: #444; }
+    </style>
+</head>
+<body>
+    <p>System Active</p>
+    <audio id="silence" loop playsinline>
+        <source src="data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" type="audio/mpeg">
+    </audio>
+    
+    <script>
+        const audio = document.getElementById('silence');
+        
+        // Funzione per avviare l'audio
+        function startKeepAlive() {
+            audio.play().then(() => {
+                console.log("Keep-alive audio started");
+                document.body.style.backgroundColor = "#111"; // Feedback visivo (leggero cambio colore)
+            }).catch(e => {
+                console.log("Autoplay blocked - waiting for interaction");
+            });
+        }
+
+        // Tenta l'avvio immediato
+        startKeepAlive();
+
+        // Riprova al primo tocco ovunque sulla pagina
+        document.addEventListener('click', startKeepAlive);
+        document.addEventListener('touchstart', startKeepAlive);
+        
+        // Refresh della pagina ogni 10 minuti per evitare cache/freeze del browser
+        setTimeout(() => {
+            window.location.reload();
+        }, 600000); 
+    </script>
+</body>
+</html>
