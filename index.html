@@ -3,78 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Keep Alive Status</title>
+    <title>Debug Keep Alive</title>
     <style>
         body { 
-            /* Stato Iniziale: ROSSO (Non attivo) */
-            background-color: #8B0000; 
+            background-color: #8B0000; /* Rosso Scuro */
             color: white; 
-            font-family: sans-serif; 
+            font-family: monospace; 
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
-            overflow: hidden;
-            transition: background-color 0.5s;
+            text-align: center;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background: white;
+            color: black;
+            border: none;
+            border-radius: 8px;
             cursor: pointer;
+            margin-bottom: 20px;
         }
+        #log { font-size: 12px; color: #ffcccc; max-width: 90%; word-wrap: break-word; }
         
-        /* Stato Attivo: VERDE */
-        body.active {
-            background-color: #006400;
-        }
-
-        h1 { font-size: 20px; margin: 0; }
-        p { font-size: 14px; margin-top: 5px; opacity: 0.8; }
+        body.active { background-color: #006400; } /* Verde Scuro */
     </style>
 </head>
 <body>
-    <h1 id="status-text">OFF</h1>
-    <p id="sub-text">Tocca per attivare</p>
+    
+    <button id="btn">ATTIVA AUDIO</button>
+    <div id="status">Stato: OFF</div>
+    <div id="log">...</div>
 
     <audio id="silence" loop playsinline>
-        <source src="data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" type="audio/mpeg">
+        <source src="data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV////////////////////////////////////////////" type="audio/mpeg">
     </audio>
     
     <script>
         const audio = document.getElementById('silence');
-        const statusText = document.getElementById('status-text');
-        const subText = document.getElementById('sub-text');
-        
-        function setRunning() {
-            // Cambia grafica in VERDE
-            document.body.classList.add('active');
-            statusText.innerText = "ON";
-            subText.innerText = "Keep Alive Attivo";
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        const btn = document.getElementById('btn');
+
+        function log(msg) {
+            logDiv.innerHTML += msg + "<br>";
+            console.log(msg);
         }
 
-        function startKeepAlive() {
-            // Prova a far partire l'audio
+        function activate() {
+            log("Tentativo avvio audio...");
             audio.play().then(() => {
-                console.log("Audio avviato con successo");
-                setRunning();
+                document.body.classList.add('active');
+                statusDiv.innerText = "Stato: ATTIVO (Loop in corso)";
+                btn.style.display = 'none'; // Nascondi bottone se va
+                log("Successo! Audio in riproduzione.");
             }).catch(e => {
-                console.log("Autoplay bloccato, attendo tocco utente");
-                // Se fallisce, resetta a Rosso
                 document.body.classList.remove('active');
-                statusText.innerText = "OFF";
-                subText.innerText = "Tocca qui!";
+                statusDiv.innerText = "ERRORE";
+                log("ERRORE: " + e.message); // Qui vedremo il motivo esatto!
             });
         }
 
-        // Tenta l'avvio immediato
-        startKeepAlive();
-
-        // Riprova al tocco (necessario per Echo Show/Chrome)
-        document.addEventListener('click', startKeepAlive);
-        document.addEventListener('touchstart', startKeepAlive);
+        btn.addEventListener('click', activate);
         
-        // Refresh pagina ogni 10 minuti per sicurezza
-        setTimeout(() => {
-            window.location.reload();
-        }, 600000); 
+        // Auto-test all'avvio
+        activate();
     </script>
 </body>
 </html>
