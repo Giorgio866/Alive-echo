@@ -3,90 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Keep Alive WAV</title>
+    <title>Keep Alive Final</title>
     <style>
         body { 
-            background-color: #aa0000; /* Rosso Scuro */
-            color: white; 
-            font-family: monospace; 
+            background-color: transparent; /* Trasparente per HA */
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
-            text-align: center;
-            user-select: none; /* Evita selezioni testo accidentali */
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Il Bottone Iniziale */
+        #start-btn {
+            background: rgba(20, 20, 20, 0.8);
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            padding: 8px 16px;
+            font-size: 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-weight: bold;
+            transition: all 0.3s ease;
         }
         
-        button {
-            background: white;
-            color: black;
-            border: none;
-            padding: 15px 30px;
-            font-size: 20px;
-            font-weight: bold;
-            border-radius: 8px;
-            cursor: pointer;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        #start-btn:active { transform: scale(0.95); }
+
+        /* Lo Stato Attivo (Nascosto all'inizio) */
+        #active-state {
+            display: none;
+            color: #00d2ff; /* Ciano come la tua linea */
+            font-size: 14px;
+            font-weight: 500;
+            align-items: center;
+            gap: 8px;
         }
 
-        button:active { transform: scale(0.95); }
-
-        #log {
-            font-size: 11px;
-            color: #ffcccc;
-            padding: 5px;
-            max-width: 90%;
+        /* Pallino Pulsante */
+        .dot {
+            width: 8px;
+            height: 8px;
+            background-color: #00d2ff;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #00d2ff;
+            animation: pulse 2s infinite;
         }
 
-        body.active { background-color: #008800; } /* Verde */
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
     </style>
 </head>
 <body>
 
-    <button id="btn" type="button">ATTIVA KEEP-ALIVE</button>
+    <button id="start-btn" type="button">ATTIVA SCHERMO</button>
     
-    <div id="status">Stato: FERMO</div>
-    <div id="log">...</div>
+    <div id="active-state">
+        <div class="dot"></div>
+        SYSTEM ONLINE
+    </div>
 
     <audio id="silence" loop playsinline>
         <source src="data:audio/wav;base64,UklGRiIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABkYXRh////AA==" type="audio/wav">
     </audio>
     
     <script>
-        const audio = document.getElementById('silence');
-        const statusDiv = document.getElementById('status');
-        const logDiv = document.getElementById('log');
-        const btn = document.getElementById('btn');
+        const btn = document.getElementById('start-btn');
+        const activeState = document.getElementById('active-state');
+        let audio = document.getElementById('silence');
 
-        function log(msg) {
-            logDiv.innerText = msg;
-        }
-
-        function startEngine() {
-            statusDiv.innerText = "Caricamento...";
+        function startSystem() {
+            // Volume basso per sicurezza
+            audio.volume = 0.05; 
             
-            // Forza il volume a 0 per sicurezza (anche se il file è silenzioso)
-            audio.volume = 0.1; 
-
             audio.play().then(() => {
-                document.body.classList.add('active');
-                statusDiv.innerText = "SISTEMA ATTIVO";
-                log("Audio WAV in riproduzione (Loop)");
-                btn.style.display = "none"; // Nasconde il tasto se tutto va bene
+                // Nascondi bottone, mostra stato attivo
+                btn.style.display = 'none';
+                activeState.style.display = 'flex';
             }).catch(e => {
-                document.body.classList.remove('active');
-                statusDiv.innerText = "ERRORE";
-                // Mostra l'errore esatto
-                log(e.name + ": " + e.message);
+                btn.innerText = "RIPROVA";
+                btn.style.borderColor = "orange";
             });
         }
 
-        // Ascolta click e tocco
-        btn.addEventListener('click', startEngine);
-        btn.addEventListener('touchstart', startEngine);
+        btn.addEventListener('click', startSystem);
+        btn.addEventListener('touchstart', startSystem);
     </script>
 </body>
 </html>
