@@ -3,49 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HA Keep Alive</title>
+    <title>Keep Alive Status</title>
     <style>
         body { 
-            background-color: #000000; 
-            color: #333; 
+            /* Stato Iniziale: ROSSO (Non attivo) */
+            background-color: #8B0000; 
+            color: white; 
             font-family: sans-serif; 
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             height: 100vh;
             margin: 0;
             overflow: hidden;
+            transition: background-color 0.5s;
+            cursor: pointer;
         }
-        p { font-size: 12px; color: #444; }
+        
+        /* Stato Attivo: VERDE */
+        body.active {
+            background-color: #006400;
+        }
+
+        h1 { font-size: 20px; margin: 0; }
+        p { font-size: 14px; margin-top: 5px; opacity: 0.8; }
     </style>
 </head>
 <body>
-    <p>System Active</p>
+    <h1 id="status-text">OFF</h1>
+    <p id="sub-text">Tocca per attivare</p>
+
     <audio id="silence" loop playsinline>
         <source src="data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" type="audio/mpeg">
     </audio>
     
     <script>
         const audio = document.getElementById('silence');
+        const statusText = document.getElementById('status-text');
+        const subText = document.getElementById('sub-text');
         
-        // Funzione per avviare l'audio
+        function setRunning() {
+            // Cambia grafica in VERDE
+            document.body.classList.add('active');
+            statusText.innerText = "ON";
+            subText.innerText = "Keep Alive Attivo";
+        }
+
         function startKeepAlive() {
+            // Prova a far partire l'audio
             audio.play().then(() => {
-                console.log("Keep-alive audio started");
-                document.body.style.backgroundColor = "#111"; // Feedback visivo (leggero cambio colore)
+                console.log("Audio avviato con successo");
+                setRunning();
             }).catch(e => {
-                console.log("Autoplay blocked - waiting for interaction");
+                console.log("Autoplay bloccato, attendo tocco utente");
+                // Se fallisce, resetta a Rosso
+                document.body.classList.remove('active');
+                statusText.innerText = "OFF";
+                subText.innerText = "Tocca qui!";
             });
         }
 
         // Tenta l'avvio immediato
         startKeepAlive();
 
-        // Riprova al primo tocco ovunque sulla pagina
+        // Riprova al tocco (necessario per Echo Show/Chrome)
         document.addEventListener('click', startKeepAlive);
         document.addEventListener('touchstart', startKeepAlive);
         
-        // Refresh della pagina ogni 10 minuti per evitare cache/freeze del browser
+        // Refresh pagina ogni 10 minuti per sicurezza
         setTimeout(() => {
             window.location.reload();
         }, 600000); 
