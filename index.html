@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Keep Alive Diagnostic</title>
+    <title>Keep Alive WAV</title>
     <style>
         body { 
             background-color: #aa0000; /* Rosso Scuro */
@@ -16,33 +16,29 @@
             height: 100vh;
             margin: 0;
             text-align: center;
+            user-select: none; /* Evita selezioni testo accidentali */
         }
         
         button {
             background: white;
             color: black;
             border: none;
-            padding: 10px 20px;
-            font-size: 18px;
+            padding: 15px 30px;
+            font-size: 20px;
             font-weight: bold;
-            border-radius: 5px;
+            border-radius: 8px;
             cursor: pointer;
-            margin-bottom: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
 
-        button:active {
-            transform: scale(0.95);
-        }
+        button:active { transform: scale(0.95); }
 
         #log {
-            font-size: 12px;
+            font-size: 11px;
             color: #ffcccc;
-            padding: 10px;
-            border: 1px solid #ff9999;
-            background: rgba(0,0,0,0.2);
+            padding: 5px;
             max-width: 90%;
-            word-wrap: break-word;
         }
 
         body.active { background-color: #008800; } /* Verde */
@@ -50,52 +46,45 @@
 </head>
 <body>
 
-    <button id="btn" type="button">AVVIA KEEP ALIVE</button>
+    <button id="btn" type="button">ATTIVA KEEP-ALIVE</button>
     
     <div id="status">Stato: FERMO</div>
-    <br>
-    <div id="log">In attesa di tocco...</div>
+    <div id="log">...</div>
 
+    <audio id="silence" loop playsinline>
+        <source src="data:audio/wav;base64,UklGRiIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABkYXRh////AA==" type="audio/wav">
+    </audio>
+    
     <script>
+        const audio = document.getElementById('silence');
         const statusDiv = document.getElementById('status');
         const logDiv = document.getElementById('log');
         const btn = document.getElementById('btn');
-        let audio = null;
 
         function log(msg) {
-            logDiv.innerText = msg; // Scrive l'errore a schermo
+            logDiv.innerText = msg;
         }
 
         function startEngine() {
-            statusDiv.innerText = "Tentativo in corso...";
+            statusDiv.innerText = "Caricamento...";
             
-            try {
-                // Creiamo l'audio via Javascript (più compatibile)
-                if (!audio) {
-                    audio = new Audio();
-                    audio.loop = true;
-                    // MP3 silenzioso base64
-                    audio.src = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV////////////////////////////////////////////";
-                }
+            // Forza il volume a 0 per sicurezza (anche se il file è silenzioso)
+            audio.volume = 0.1; 
 
-                audio.play().then(() => {
-                    document.body.classList.add('active');
-                    statusDiv.innerText = "ATTIVO (Audio Loop)";
-                    log("OK: Audio riprodotto correttamente.");
-                    btn.style.display = "none"; // Nasconde il bottone se va
-                }).catch(e => {
-                    document.body.classList.remove('active');
-                    statusDiv.innerText = "ERRORE PLAY";
-                    log("ERR: " + e.name + " - " + e.message);
-                });
-
-            } catch (err) {
-                statusDiv.innerText = "ERRORE CRITICO";
-                log("CATCH: " + err.message);
-            }
+            audio.play().then(() => {
+                document.body.classList.add('active');
+                statusDiv.innerText = "SISTEMA ATTIVO";
+                log("Audio WAV in riproduzione (Loop)");
+                btn.style.display = "none"; // Nasconde il tasto se tutto va bene
+            }).catch(e => {
+                document.body.classList.remove('active');
+                statusDiv.innerText = "ERRORE";
+                // Mostra l'errore esatto
+                log(e.name + ": " + e.message);
+            });
         }
 
-        // Ascolta sia click che touchstart (per Echo Show)
+        // Ascolta click e tocco
         btn.addEventListener('click', startEngine);
         btn.addEventListener('touchstart', startEngine);
     </script>
