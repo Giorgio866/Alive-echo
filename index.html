@@ -22,6 +22,15 @@
         #status {
             font-size: 12px;
             color: #444; /* Quasi invisibile */
+            opacity: 1;
+            transition: opacity 120ms ease-in-out;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #status.hidden {
+            opacity: 0;
+            pointer-events: none;
         }
     </style>
 </head>
@@ -41,6 +50,12 @@
             statusDiv.innerText = msg;
             if(msg === "Running") {
                 statusDiv.style.color = "#006400"; // Verde scuro (Running)
+                // Sparisce una volta avviato correttamente
+                statusDiv.classList.add("hidden");
+            } else {
+                // Se è bloccato o richiede un altro tap, mostralo
+                statusDiv.classList.remove("hidden");
+                statusDiv.style.color = "#444";
             }
         }
 
