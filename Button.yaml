@@ -1,0 +1,14 @@
+type: iframe
+url: https://Giorgio866.github.io/Alive-echo/?v=6
+aspect_ratio: 0%
+title: null
+card_mod:
+  style: |
+    ha-card {
+      height: 50px !important;
+      width: 100% !important;
+      background: transparent !important;
+      border: none !important;
+      opacity: 0.8; 
+      pointer-events: auto !important;
+    }
