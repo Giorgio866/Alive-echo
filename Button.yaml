@@ -11,4 +11,10 @@ card_mod:
       border: none !important;
       opacity: 0.8; 
       pointer-events: auto !important;
+      transition: opacity 80ms ease-in-out;
+    }
+
+    /* Più trasparente mentre è premuto */
+    ha-card:active {
+      opacity: 0.35 !important;
     }
