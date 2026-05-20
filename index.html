@@ -22,12 +22,21 @@
         #status {
             font-size: 12px;
             color: #444; /* Quasi invisibile */
+            background: transparent;
+            border: 0;
+            padding: 0;
+            cursor: inherit;
+        }
+
+        /* Rende il "pulsante" trasparente mentre è premuto */
+        #status:active {
+            opacity: 0.2;
         }
     </style>
 </head>
 <body onclick="forcePlay()">
 
-    <div id="status">Touch to Start</div>
+    <button id="status" type="button">Touch to Start</button>
 
     <audio id="media" loop autoplay playsinline>
         <source src="data:audio/wav;base64,UklGRiIAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABkYXRh////AA==" type="audio/wav">
