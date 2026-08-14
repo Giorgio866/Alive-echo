@@ -1,7 +1,7 @@
-import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
 import '../data/models/document_models.dart';
 
@@ -13,16 +13,7 @@ class ThermalPrinterDevice {
 }
 
 /// Servizio di stampa etichette ESC/POS via Bluetooth (Android).
-/// Su piattaforme non supportate espone anteprima testo e messaggi chiari.
 class ThermalPrintService {
-  ThermalPrintService({BlueThermalPrinter? printer}) : _printerOverride = printer;
-
-  final BlueThermalPrinter? _printerOverride;
-  BlueThermalPrinter? _printerLazy;
-
-  BlueThermalPrinter get _printer =>
-      _printerOverride ?? (_printerLazy ??= BlueThermalPrinter.instance);
-
   final _dateFmt = DateFormat('dd/MM/yyyy HH:mm');
   final _dayFmt = DateFormat('dd/MM/yyyy');
 
@@ -30,15 +21,14 @@ class ThermalPrintService {
 
   Future<bool> get isConnected async {
     if (!isSupported) return false;
-    return await _printer.isConnected ?? false;
+    return PrintBluetoothThermal.connectionStatus;
   }
 
   Future<List<ThermalPrinterDevice>> bondedDevices() async {
     if (!isSupported) return const [];
-    final devices = await _printer.getBondedDevices();
+    final devices = await PrintBluetoothThermal.pairedBluetooths;
     return devices
-        .where((d) => d.name != null && d.address != null)
-        .map((d) => ThermalPrinterDevice(name: d.name!, address: d.address!))
+        .map((d) => ThermalPrinterDevice(name: d.name, address: d.macAdress))
         .toList();
   }
 
@@ -46,13 +36,15 @@ class ThermalPrintService {
     if (!isSupported) {
       throw UnsupportedError('La stampa Bluetooth è disponibile solo su Android.');
     }
-    final bt = BluetoothDevice(device.name, device.address);
-    await _printer.connect(bt);
+    final ok = await PrintBluetoothThermal.connect(macPrinterAddress: device.address);
+    if (!ok) {
+      throw StateError('Connessione alla stampante fallita (${device.name}).');
+    }
   }
 
   Future<void> disconnect() async {
     if (!isSupported) return;
-    await _printer.disconnect();
+    await PrintBluetoothThermal.disconnect;
   }
 
   Future<Uint8List> buildLabelBytes(LabelDraft draft, {String activityName = 'HACCP'}) async {
@@ -141,7 +133,10 @@ class ThermalPrintService {
     }
     final bytes = await buildLabelBytes(draft, activityName: activityName);
     for (var i = 0; i < draft.copies; i++) {
-      await _printer.writeBytes(bytes);
+      final ok = await PrintBluetoothThermal.writeBytes(bytes);
+      if (!ok) {
+        throw StateError('Invio stampa fallito (copia ${i + 1}).');
+      }
     }
   }
 }

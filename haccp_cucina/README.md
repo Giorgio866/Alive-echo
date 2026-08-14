@@ -13,6 +13,28 @@ App Android Flutter per la gestione operativa HACCP in **cucina** e **pizzeria**
 
 I dati restano **offline sul dispositivo** (SQLite + file locali).
 
+## APK Android pronto
+
+File installabile (release):
+
+- `haccp_cucina/dist/HACCP-Cucina.apk`
+
+### Installazione sul telefono
+
+1. Copia `HACCP-Cucina.apk` sul telefono (USB, Drive, email, ecc.)
+2. Apri il file e consenti **origini sconosciute** se richiesto
+3. Installa e apri **HACCP Cucina**
+
+> Nota: l’APK è firmato con la chiave **debug** di sviluppo (ok per prova interna). Per Play Store serve una keystore di release.
+
+### Rigenerare l’APK
+
+```bash
+cd haccp_cucina
+flutter build apk --release
+cp build/app/outputs/flutter-apk/app-release.apk dist/HACCP-Cucina.apk
+```
+
 ## Requisiti
 
 - Flutter 3.32+ / Dart 3.8+
