@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/models/temperature_models.dart';
@@ -18,7 +19,16 @@ class TemperaturesScreen extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Temperature CCP')),
+      appBar: AppBar(
+        title: const Text('Temperature CCP'),
+        actions: [
+          IconButton(
+            tooltip: 'Storico 30 giorni',
+            onPressed: () => context.push('/temperature-history'),
+            icon: const Icon(Icons.history),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final points = pointsAsync.value ?? [];

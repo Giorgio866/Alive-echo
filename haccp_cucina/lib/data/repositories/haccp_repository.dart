@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../database/app_database.dart';
 import '../models/cleaning_models.dart';
 import '../models/document_models.dart';
+import '../models/ingredient_models.dart';
 import '../models/product_lot.dart';
 import '../models/temperature_models.dart';
 
@@ -55,17 +56,37 @@ class HaccpRepository {
     );
     final db = await _database;
     await db.insert('temperature_readings', reading.toMap());
+    await AppDatabase.purgeOldTemperatureReadings(db);
     return reading;
   }
 
-  Future<List<TemperatureReading>> getReadingsForPoint(String pointId, {int limit = 30}) async {
+  Future<List<TemperatureReading>> getReadingsForPoint(
+    String pointId, {
+    int? limit,
+    int days = AppDatabase.temperatureRetentionDays,
+  }) async {
     final db = await _database;
+    final cutoff = DateTime.now().subtract(Duration(days: days)).toIso8601String();
     final rows = await db.query(
       'temperature_readings',
-      where: 'point_id = ?',
-      whereArgs: [pointId],
+      where: 'point_id = ? AND recorded_at >= ?',
+      whereArgs: [pointId, cutoff],
       orderBy: 'recorded_at DESC',
       limit: limit,
+    );
+    return rows.map(TemperatureReading.fromMap).toList();
+  }
+
+  Future<List<TemperatureReading>> getReadingsLastDays({
+    int days = AppDatabase.temperatureRetentionDays,
+  }) async {
+    final db = await _database;
+    final cutoff = DateTime.now().subtract(Duration(days: days)).toIso8601String();
+    final rows = await db.query(
+      'temperature_readings',
+      where: 'recorded_at >= ?',
+      whereArgs: [cutoff],
+      orderBy: 'recorded_at DESC',
     );
     return rows.map(TemperatureReading.fromMap).toList();
   }
@@ -231,6 +252,71 @@ class HaccpRepository {
     await db.delete('documents', where: 'id = ?', whereArgs: [id]);
   }
 
+  // --- Ingredients / preparati Blue Eyes ---
+
+  Future<List<IngredientCatalogItem>> getIngredientCatalog({String? category}) async {
+    final db = await _database;
+    final rows = await db.query(
+      'ingredient_catalog',
+      where: category == null ? null : 'category = ?',
+      whereArgs: category == null ? null : [category],
+      orderBy: 'category ASC, name ASC',
+    );
+    return rows.map(IngredientCatalogItem.fromMap).toList();
+  }
+
+  Future<PreparedBatch> registerPreparedBatch({
+    required IngredientCatalogItem ingredient,
+    required String operatorName,
+    DateTime? preparedAt,
+    String? lotCode,
+    String? note,
+    int? overrideDays,
+  }) async {
+    final prep = preparedAt ?? DateTime.now();
+    final days = overrideDays ?? ingredient.recommendedDays;
+    final expiryDay = DateTime(prep.year, prep.month, prep.day).add(Duration(days: days));
+    final expiresAt = DateTime(expiryDay.year, expiryDay.month, expiryDay.day, 23, 59);
+    final batch = PreparedBatch(
+      id: _uuid.v4(),
+      ingredientId: ingredient.id,
+      ingredientName: ingredient.name,
+      preparedAt: prep,
+      expiresAt: expiresAt,
+      operatorName: operatorName,
+      lotCode: lotCode,
+      note: note,
+    );
+    final db = await _database;
+    await db.insert('prepared_batches', batch.toMap());
+    return batch;
+  }
+
+  Future<List<PreparedBatch>> getPreparedBatches({bool activeOnly = true}) async {
+    final db = await _database;
+    final rows = await db.query('prepared_batches', orderBy: 'expires_at ASC');
+    final batches = rows.map(PreparedBatch.fromMap).toList();
+    if (!activeOnly) return batches;
+    final now = DateTime.now().subtract(const Duration(days: 1));
+    return batches.where((b) => b.expiresAt.isAfter(now)).toList();
+  }
+
+  Future<List<PreparedBatch>> getExpiringBatches({int withinHours = 24}) async {
+    final batches = await getPreparedBatches(activeOnly: false);
+    final limit = DateTime.now().add(Duration(hours: withinHours));
+    return batches.where((b) => !b.isExpired && b.expiresAt.isBefore(limit)).toList();
+  }
+
+  Future<void> deletePreparedBatch(String id) async {
+    final db = await _database;
+    await db.delete('prepared_batches', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> markBatchNotified(String id) async {
+    final db = await _database;
+    await db.update('prepared_batches', {'notified': 1}, where: 'id = ?', whereArgs: [id]);
+  }
+
   // --- Dashboard helpers ---
 
   Future<DashboardSnapshot> getDashboardSnapshot() async {
@@ -241,11 +327,17 @@ class HaccpRepository {
     final doneToday = await getTaskIdsCompletedToday();
     final lots = await getLots();
     final docs = await getDocuments();
+    final batches = await getPreparedBatches();
+    final history = await getReadingsLastDays();
+    final catalog = await getIngredientCatalog();
 
-    final missingTemp = points.where((p) => latest[p.id] == null || !_isToday(latest[p.id]!.recordedAt)).length;
+    final missingTemp =
+        points.where((p) => latest[p.id] == null || !_isToday(latest[p.id]!.recordedAt)).length;
     final outOfRange = todayReadings.where((r) => r.outOfRange).length;
-    final pendingCleaning = tasks.where((t) => t.frequency == 'daily' && !doneToday.contains(t.id)).length;
+    final pendingCleaning =
+        tasks.where((t) => t.frequency == 'daily' && !doneToday.contains(t.id)).length;
     final expiringLots = lots.where((l) => l.isExpired || l.expiresSoon).length;
+    final expiringPrep = batches.where((b) => b.isExpired || b.expiresSoon).length;
 
     return DashboardSnapshot(
       activityLabel: 'Controllo giornaliero',
@@ -253,10 +345,13 @@ class HaccpRepository {
       missingTemperatureChecks: missingTemp,
       outOfRangeAlerts: outOfRange,
       pendingCleaningTasks: pendingCleaning,
-      expiringLots: expiringLots,
+      expiringLots: expiringLots + expiringPrep,
       documentCount: docs.length,
       lots: lots.take(5).toList(),
       recentReadings: todayReadings.take(5).toList(),
+      temperatureHistoryCount: history.length,
+      ingredientCatalogCount: catalog.length,
+      activePreparedBatches: batches.length,
     );
   }
 
@@ -276,6 +371,9 @@ class DashboardSnapshot {
   final int documentCount;
   final List<ProductLot> lots;
   final List<TemperatureReading> recentReadings;
+  final int temperatureHistoryCount;
+  final int ingredientCatalogCount;
+  final int activePreparedBatches;
 
   const DashboardSnapshot({
     required this.activityLabel,
@@ -287,5 +385,8 @@ class DashboardSnapshot {
     required this.documentCount,
     required this.lots,
     required this.recentReadings,
+    this.temperatureHistoryCount = 0,
+    this.ingredientCatalogCount = 0,
+    this.activePreparedBatches = 0,
   });
 }

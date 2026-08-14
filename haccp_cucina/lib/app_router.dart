@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 import '../features/cleaning/cleaning_screen.dart';
 import '../features/documents/documents_screen.dart';
 import '../features/home/home_screen.dart';
+import '../features/ingredients/ingredients_screen.dart';
 import '../features/labels/labels_screen.dart';
 import '../features/lots/lots_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/temperatures/temperature_history_screen.dart';
 import '../features/temperatures/temperatures_screen.dart';
 import '../theme/app_theme.dart';
 
@@ -43,6 +45,11 @@ final appRouter = GoRouter(
             GoRoute(path: '/more', builder: (context, state) => const MoreHubScreen()),
             GoRoute(path: '/documents', builder: (context, state) => const DocumentsScreen()),
             GoRoute(path: '/labels', builder: (context, state) => const LabelsScreen()),
+            GoRoute(path: '/ingredients', builder: (context, state) => const IngredientsScreen()),
+            GoRoute(
+              path: '/temperature-history',
+              builder: (context, state) => const TemperatureHistoryScreen(),
+            ),
             GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
           ],
         ),
@@ -105,6 +112,20 @@ class MoreHubScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _HubTile(
+            icon: Icons.restaurant_menu,
+            title: 'Preparati Blue Eyes',
+            subtitle: 'Ingredienti menu + scadenze automatiche',
+            onTap: () => context.push('/ingredients'),
+          ),
+          const SizedBox(height: 10),
+          _HubTile(
+            icon: Icons.history,
+            title: 'Storico temperature 30 gg',
+            subtitle: 'Archivio letture CCP',
+            onTap: () => context.push('/temperature-history'),
+          ),
+          const SizedBox(height: 10),
           _HubTile(
             icon: Icons.document_scanner_outlined,
             title: 'Scansione documenti',

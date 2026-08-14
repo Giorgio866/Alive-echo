@@ -120,6 +120,11 @@ class HomeScreen extends ConsumerWidget {
                             onTap: () => context.go('/temperature'),
                           ),
                           _QuickAction(
+                            icon: Icons.restaurant_menu,
+                            label: 'Preparato\nBlue Eyes',
+                            onTap: () => context.go('/ingredients'),
+                          ),
+                          _QuickAction(
                             icon: Icons.document_scanner_outlined,
                             label: 'Scansiona\ndocumento',
                             onTap: () => context.go('/documents'),

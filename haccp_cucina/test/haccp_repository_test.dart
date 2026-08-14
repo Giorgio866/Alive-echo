@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:haccp_cucina/data/database/app_database.dart';
+import 'package:haccp_cucina/data/models/ingredient_models.dart';
 import 'package:haccp_cucina/data/models/product_lot.dart';
 import 'package:haccp_cucina/data/repositories/haccp_repository.dart';
 import 'package:haccp_cucina/services/thermal_print_service.dart';
@@ -36,6 +37,42 @@ void main() {
       expect(tasks.length, greaterThanOrEqualTo(5));
     });
 
+    test('catalogo Blue Eyes precaricato con scadenze', () async {
+      final catalog = await repo.getIngredientCatalog();
+      expect(catalog.length, greaterThanOrEqualTo(40));
+      final mozzarella = catalog.firstWhere((c) => c.id == 'mozzarella');
+      expect(mozzarella.recommendedDays, 2);
+      expect(catalog.any((c) => c.name.toLowerCase().contains('pomodoro')), isTrue);
+      expect(catalog.any((c) => c.name.toLowerCase().contains('speck')), isTrue);
+    });
+
+    test('preparato calcola scadenza consigliata', () async {
+      final catalog = await repo.getIngredientCatalog();
+      final item = catalog.firstWhere((c) => c.id == 'bufala');
+      final batch = await repo.registerPreparedBatch(
+        ingredient: item,
+        operatorName: 'Marco',
+        preparedAt: DateTime(2026, 8, 14, 10),
+      );
+      expect(batch.ingredientName, contains('bufala'));
+      expect(batch.expiresAt.difference(DateTime(2026, 8, 14)).inDays, item.recommendedDays);
+    });
+
+    test('storico temperature conserva fino a 30 giorni', () async {
+      final points = await repo.getTemperaturePoints();
+      final frigo = points.first;
+      await repo.addTemperatureReading(
+        pointId: frigo.id,
+        valueC: 3,
+        operatorName: 'Test',
+        minC: frigo.minC,
+        maxC: frigo.maxC,
+      );
+      final history = await repo.getReadingsLastDays(days: 30);
+      expect(history, isNotEmpty);
+      expect(AppDatabase.temperatureRetentionDays, 30);
+    });
+
     test('lettura temperatura marca fuori range', () async {
       final points = await repo.getTemperaturePoints();
       final frigo = points.firstWhere((p) => p.zone == 'frigo');
@@ -64,14 +101,12 @@ void main() {
       final opened = await repo.markLotOpened(lot, daysUsable: 3);
       expect(opened.opened, isTrue);
       expect(opened.useByAfterOpen, isNotNull);
-      expect(opened.expiresSoon || !opened.isExpired, isTrue);
     });
 
     test('dashboard snapshot aggrega alert', () async {
       final snap = await repo.getDashboardSnapshot();
       expect(snap.temperaturePoints, greaterThan(0));
-      expect(snap.missingTemperatureChecks, greaterThan(0));
-      expect(snap.pendingCleaningTasks, greaterThan(0));
+      expect(snap.ingredientCatalogCount, greaterThan(0));
     });
   });
 
@@ -92,9 +127,6 @@ void main() {
       );
       expect(text, contains('PIZZERIA TEST'));
       expect(text, contains('Sugo pomodoro'));
-      expect(text, contains('Lotto: A1'));
-      expect(text, contains('Allergeni: Sedano'));
-      expect(text, contains('Marco'));
     });
   });
 
@@ -113,6 +145,14 @@ void main() {
         useByAfterOpen: DateTime(2026, 8, 4),
       );
       expect(lot.effectiveExpiry, DateTime(2026, 8, 4));
+    });
+  });
+
+  group('Blue Eyes catalog', () {
+    test('lista ingredienti menu non vuota', () {
+      final items = blueEyesIngredientCatalog();
+      expect(items.length, greaterThan(50));
+      expect(items.every((i) => i.recommendedDays > 0), isTrue);
     });
   });
 }

@@ -200,6 +200,7 @@ class LotsScreen extends ConsumerWidget {
                           allergens: allergensCtrl.text.trim().isEmpty ? null : allergensCtrl.text.trim(),
                         );
                         await ref.read(haccpRepositoryProvider).upsertLot(lot);
+                        await ref.read(expiryNotificationServiceProvider).scheduleLotExpiry(lot);
                         ref.invalidate(lotsProvider);
                         ref.invalidate(dashboardProvider);
                         if (ctx.mounted) Navigator.pop(ctx);

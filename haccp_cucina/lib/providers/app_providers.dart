@@ -2,10 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/models/cleaning_models.dart';
 import '../data/models/document_models.dart';
+import '../data/models/ingredient_models.dart';
 import '../data/models/product_lot.dart';
 import '../data/models/temperature_models.dart';
 import '../data/repositories/haccp_repository.dart';
 import '../services/document_scan_service.dart';
+import '../services/expiry_notification_service.dart';
 import '../services/settings_service.dart';
 import '../services/thermal_print_service.dart';
 
@@ -25,6 +27,10 @@ final settingsServiceProvider = Provider<SettingsService>((ref) {
   return SettingsService();
 });
 
+final expiryNotificationServiceProvider = Provider<ExpiryNotificationService>((ref) {
+  return ExpiryNotificationService();
+});
+
 final settingsProvider = FutureProvider<AppSettings>((ref) async {
   return ref.watch(settingsServiceProvider).load();
 });
@@ -41,6 +47,10 @@ final latestReadingsProvider = FutureProvider<Map<String, TemperatureReading?>>(
   return ref.watch(haccpRepositoryProvider).latestReadingByPoint();
 });
 
+final temperatureHistoryProvider = FutureProvider<List<TemperatureReading>>((ref) async {
+  return ref.watch(haccpRepositoryProvider).getReadingsLastDays();
+});
+
 final cleaningTasksProvider = FutureProvider<List<CleaningTask>>((ref) async {
   return ref.watch(haccpRepositoryProvider).getCleaningTasks();
 });
@@ -55,4 +65,12 @@ final lotsProvider = FutureProvider<List<ProductLot>>((ref) async {
 
 final documentsProvider = FutureProvider<List<DocumentRecord>>((ref) async {
   return ref.watch(haccpRepositoryProvider).getDocuments();
+});
+
+final ingredientCatalogProvider = FutureProvider<List<IngredientCatalogItem>>((ref) async {
+  return ref.watch(haccpRepositoryProvider).getIngredientCatalog();
+});
+
+final preparedBatchesProvider = FutureProvider<List<PreparedBatch>>((ref) async {
+  return ref.watch(haccpRepositoryProvider).getPreparedBatches();
 });

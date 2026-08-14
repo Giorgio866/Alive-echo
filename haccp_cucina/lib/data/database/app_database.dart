@@ -3,11 +3,15 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/cleaning_models.dart';
+import '../models/ingredient_models.dart';
 import '../models/temperature_models.dart';
 
 class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
+
+  /// Conservazione minima letture temperatura (giorni).
+  static const int temperatureRetentionDays = 30;
 
   Database? _db;
   static const _uuid = Uuid();
@@ -18,7 +22,6 @@ class AppDatabase {
     return _db!;
   }
 
-  /// Permette di iniettare un DB in-memory per i test.
   Future<void> useDatabase(Database db) async {
     _db = db;
   }
@@ -31,13 +34,33 @@ class AppDatabase {
   Future<Database> _open() async {
     final databasesPath = await getDatabasesPath();
     final path = p.join(databasesPath, 'haccp_cucina.db');
-    return openDatabase(
+    final db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await _createIngredientTables(db);
+          await _seedIngredients(db);
+        }
+      },
+    );
+    await purgeOldTemperatureReadings(db);
+    return db;
+  }
+
+  /// Elimina letture più vecchie di [temperatureRetentionDays].
+  static Future<int> purgeOldTemperatureReadings(Database db) async {
+    final cutoff = DateTime.now()
+        .subtract(const Duration(days: temperatureRetentionDays))
+        .toIso8601String();
+    return db.delete(
+      'temperature_readings',
+      where: 'recorded_at < ?',
+      whereArgs: [cutoff],
     );
   }
 
@@ -63,6 +86,9 @@ class AppDatabase {
         out_of_range INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY(point_id) REFERENCES temperature_points(id)
       )
+    ''');
+    await db.execute('''
+      CREATE INDEX idx_readings_recorded_at ON temperature_readings(recorded_at)
     ''');
     await db.execute('''
       CREATE TABLE cleaning_tasks (
@@ -114,52 +140,48 @@ class AppDatabase {
         supplier TEXT
       )
     ''');
+    await _createIngredientTables(db);
+  }
+
+  static Future<void> _createIngredientTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ingredient_catalog (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        recommended_days INTEGER NOT NULL,
+        storage_hint TEXT NOT NULL,
+        allergens TEXT,
+        source TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS prepared_batches (
+        id TEXT PRIMARY KEY,
+        ingredient_id TEXT NOT NULL,
+        ingredient_name TEXT NOT NULL,
+        prepared_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        operator_name TEXT NOT NULL,
+        lot_code TEXT,
+        note TEXT,
+        notified INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY(ingredient_id) REFERENCES ingredient_catalog(id)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_batches_expires_at ON prepared_batches(expires_at)
+    ''');
   }
 
   static Future<void> _seed(Database db) async {
     final points = [
-      TemperaturePoint(
-        id: _uuid.v4(),
-        name: 'Frigo verdure',
-        zone: 'frigo',
-        minC: 0,
-        maxC: 4,
-      ),
-      TemperaturePoint(
-        id: _uuid.v4(),
-        name: 'Frigo latticini',
-        zone: 'frigo',
-        minC: 0,
-        maxC: 4,
-      ),
-      TemperaturePoint(
-        id: _uuid.v4(),
-        name: 'Congelatore surgelati',
-        zone: 'freezer',
-        minC: -25,
-        maxC: -18,
-      ),
-      TemperaturePoint(
-        id: _uuid.v4(),
-        name: 'Abbattitore',
-        zone: 'abbattitore',
-        minC: -40,
-        maxC: 3,
-      ),
-      TemperaturePoint(
-        id: _uuid.v4(),
-        name: 'Banco pizza caldo',
-        zone: 'banco_caldo',
-        minC: 60,
-        maxC: 75,
-      ),
-      TemperaturePoint(
-        id: _uuid.v4(),
-        name: 'Vetrina mozzarella',
-        zone: 'frigo',
-        minC: 0,
-        maxC: 4,
-      ),
+      TemperaturePoint(id: _uuid.v4(), name: 'Frigo verdure', zone: 'frigo', minC: 0, maxC: 4),
+      TemperaturePoint(id: _uuid.v4(), name: 'Frigo latticini', zone: 'frigo', minC: 0, maxC: 4),
+      TemperaturePoint(id: _uuid.v4(), name: 'Congelatore surgelati', zone: 'freezer', minC: -25, maxC: -18),
+      TemperaturePoint(id: _uuid.v4(), name: 'Abbattitore', zone: 'abbattitore', minC: -40, maxC: 3),
+      TemperaturePoint(id: _uuid.v4(), name: 'Banco pizza caldo', zone: 'banco_caldo', minC: 60, maxC: 75),
+      TemperaturePoint(id: _uuid.v4(), name: 'Vetrina mozzarella', zone: 'frigo', minC: 0, maxC: 4),
     ];
     for (final point in points) {
       await db.insert('temperature_points', point.toMap());
@@ -212,13 +234,24 @@ class AppDatabase {
     for (final task in tasks) {
       await db.insert('cleaning_tasks', task.toMap());
     }
+
+    await _seedIngredients(db);
   }
 
-  /// Crea uno schema completo in memoria (test).
+  static Future<void> _seedIngredients(Database db) async {
+    for (final item in blueEyesIngredientCatalog()) {
+      await db.insert(
+        'ingredient_catalog',
+        item.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
   static Future<Database> openInMemory() async {
     final db = await openDatabase(
       inMemoryDatabasePath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);
