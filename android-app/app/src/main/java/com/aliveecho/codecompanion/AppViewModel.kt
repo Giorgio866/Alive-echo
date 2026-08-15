@@ -406,8 +406,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         return uri.lastPathSegment?.substringAfterLast('/') ?: "model.gguf"
     }
-        _ui.update { it.copy(hfQuery = value) }
-    }
 
     fun updateHfToken(value: String) {
         prefs.edit().putString(KEY_TOKEN, value).apply()
