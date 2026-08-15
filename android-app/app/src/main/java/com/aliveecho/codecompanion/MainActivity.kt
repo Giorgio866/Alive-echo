@@ -47,13 +47,14 @@ class MainActivity : ComponentActivity() {
                         onDownload = viewModel::downloadModel,
                         onLoad = viewModel::loadModel,
                         onClearError = viewModel::clearError,
+                        onCompileModeChange = viewModel::setCompileMode,
                         onServerUrlChange = viewModel::updateServerUrl,
                         onAutoCompileChange = viewModel::setAutoCompile,
                         onAutoFixChange = viewModel::setAutoFixOnError,
                         onCheckServer = viewModel::checkServer,
                         onCompileNow = viewModel::compileNow,
                     )
-                    HiddenInferenceWebView(viewModel)
+                    HiddenWebEngines(viewModel)
                 }
             }
         }
@@ -61,10 +62,20 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HiddenInferenceWebView(viewModel: AppViewModel) {
+private fun HiddenWebEngines(viewModel: AppViewModel) {
     AndroidView(
         factory = { context ->
             viewModel.engine.attachWebView(context).also { webView ->
+                (webView.parent as? ViewGroup)?.removeView(webView)
+                webView.layoutParams = ViewGroup.LayoutParams(1, 1)
+                webView.alpha = 0f
+            }
+        },
+        modifier = Modifier.size(1.dp),
+    )
+    AndroidView(
+        factory = { context ->
+            viewModel.localRuntime.attachWebView(context).also { webView ->
                 (webView.parent as? ViewGroup)?.removeView(webView)
                 webView.layoutParams = ViewGroup.LayoutParams(1, 1)
                 webView.alpha = 0f

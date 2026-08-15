@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aliveecho.codecompanion.AppUiState
 import com.aliveecho.codecompanion.ChatMessage
+import com.aliveecho.codecompanion.CompileMode
 import com.aliveecho.codecompanion.HfModel
 import com.aliveecho.codecompanion.ModelCatalog
 
@@ -84,6 +85,7 @@ fun CodeCompanionApp(
     onDownload: (HfModel) -> Unit,
     onLoad: (HfModel) -> Unit,
     onClearError: () -> Unit,
+    onCompileModeChange: (CompileMode) -> Unit,
     onServerUrlChange: (String) -> Unit,
     onAutoCompileChange: (Boolean) -> Unit,
     onAutoFixChange: (Boolean) -> Unit,
@@ -178,6 +180,7 @@ fun CodeCompanionApp(
                 1 -> ChatScreen(state, onChatInputChange, onSendChat)
                 2 -> BuildScreen(
                     state = state,
+                    onCompileModeChange = onCompileModeChange,
                     onServerUrlChange = onServerUrlChange,
                     onAutoCompileChange = onAutoCompileChange,
                     onAutoFixChange = onAutoFixChange,
@@ -211,7 +214,11 @@ private fun EditorScreen(
             color = Ink,
         )
         Text(
-            "Compilazione automatica sul PC remoto (scheda Build).",
+            if (state.compileMode == CompileMode.LOCAL) {
+                "Esecuzione DENTRO l'app (Python / JavaScript)."
+            } else {
+                "Esecuzione sul PC remoto (scheda Build)."
+            },
             color = Smoke,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -318,6 +325,7 @@ private fun CompileOutputBox(state: AppUiState) {
 @Composable
 private fun BuildScreen(
     state: AppUiState,
+    onCompileModeChange: (CompileMode) -> Unit,
     onServerUrlChange: (String) -> Unit,
     onAutoCompileChange: (Boolean) -> Unit,
     onAutoFixChange: (Boolean) -> Unit,
@@ -331,55 +339,88 @@ private fun BuildScreen(
             .padding(16.dp),
     ) {
         Text(
-            "Compilazione automatica",
+            "Compilazione",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             color = Ink,
         )
         Text(
-            "Serve un PC: avvia il compile-server, poi collega l'APK.",
+            "Di default gira DENTRO l'app (Python e JavaScript).",
             color = Smoke,
         )
         Spacer(Modifier.height(12.dp))
-        Text("URL server PC", fontWeight = FontWeight.Medium, color = Ink)
-        Spacer(Modifier.height(6.dp))
-        BasicTextField(
-            value = state.compileServerUrl,
-            onValueChange = onServerUrlChange,
-            textStyle = TextStyle(color = Ink, fontFamily = FontFamily.Monospace, fontSize = 14.sp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Sand, RoundedCornerShape(10.dp))
-                .padding(12.dp),
-        )
-        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onCheckServer) {
-                Icon(Icons.Default.Refresh, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Test connessione")
+            FilterChip(
+                selected = state.compileMode == CompileMode.LOCAL,
+                onClick = { onCompileModeChange(CompileMode.LOCAL) },
+                label = { Text("Nell'app") },
+            )
+            FilterChip(
+                selected = state.compileMode == CompileMode.REMOTE,
+                onClick = { onCompileModeChange(CompileMode.REMOTE) },
+                label = { Text("PC (opzionale)") },
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            if (state.localRuntimeReady) "Runtime app pronto" else "Runtime app in avvio…",
+            color = if (state.localRuntimeReady) Moss else Smoke,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(12.dp))
+        if (state.compileMode == CompileMode.REMOTE) {
+            Text("URL server PC", fontWeight = FontWeight.Medium, color = Ink)
+            Spacer(Modifier.height(6.dp))
+            BasicTextField(
+                value = state.compileServerUrl,
+                onValueChange = onServerUrlChange,
+                textStyle = TextStyle(color = Ink, fontFamily = FontFamily.Monospace, fontSize = 14.sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Sand, RoundedCornerShape(10.dp))
+                    .padding(12.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onCheckServer) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Test PC")
+                }
+                Button(
+                    onClick = onCompileNow,
+                    colors = ButtonDefaults.buttonColors(containerColor = Moss),
+                ) {
+                    Text("Compila ora")
+                }
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                when (state.serverOnline) {
+                    true -> "Server online · ${state.serverTools}"
+                    false -> "Server offline · ${state.serverTools}"
+                    null -> "Stato server sconosciuto"
+                },
+                color = when (state.serverOnline) {
+                    true -> Moss
+                    false -> Color(0xFF8A1F17)
+                    null -> Smoke
+                },
+            )
+        } else {
             Button(
                 onClick = onCompileNow,
                 colors = ButtonDefaults.buttonColors(containerColor = Moss),
             ) {
-                Text("Compila ora")
+                Text("Esegui ora nell'app")
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Supportati nell'app: Python, JavaScript.\nJava/Kotlin: usa modalità PC.",
+                color = Smoke,
+                fontSize = 13.sp,
+            )
         }
-        Spacer(Modifier.height(10.dp))
-        val onlineColor = when (state.serverOnline) {
-            true -> Moss
-            false -> Color(0xFF8A1F17)
-            null -> Smoke
-        }
-        Text(
-            when (state.serverOnline) {
-                true -> "Server online · ${state.serverTools}"
-                false -> "Server offline · ${state.serverTools}"
-                null -> "Stato server sconosciuto"
-            },
-            color = onlineColor,
-        )
         Spacer(Modifier.height(16.dp))
         Row(
             Modifier.fillMaxWidth(),
@@ -388,7 +429,7 @@ private fun BuildScreen(
         ) {
             Column(Modifier.weight(1f)) {
                 Text("Auto-compile", fontWeight = FontWeight.Medium, color = Ink)
-                Text("Compila a ogni modifica del codice", color = Smoke, fontSize = 13.sp)
+                Text("Esegue a ogni modifica del codice", color = Smoke, fontSize = 13.sp)
             }
             Switch(checked = state.autoCompile, onCheckedChange = onAutoCompileChange)
         }
@@ -408,18 +449,6 @@ private fun BuildScreen(
         Text("Output", fontWeight = FontWeight.Medium, color = Ink)
         Spacer(Modifier.height(6.dp))
         CompileOutputBox(state)
-        Spacer(Modifier.height(16.dp))
-        Text("Sul PC esegui:", fontWeight = FontWeight.Medium, color = Ink)
-        Text(
-            "python3 compile-server/server.py",
-            fontFamily = FontFamily.Monospace,
-            color = Ink,
-            modifier = Modifier
-                .padding(top = 6.dp)
-                .background(Sand, RoundedCornerShape(8.dp))
-                .padding(10.dp)
-                .fillMaxWidth(),
-        )
     }
 }
 
@@ -555,7 +584,7 @@ private fun ModelsScreen(
                 color = Ink,
             )
             Text(
-                "L'AI gira sul telefono. La compilazione gira sul PC.",
+                "AI + esecuzione codice (Python/JS) sul telefono.",
                 color = Smoke,
             )
             Spacer(Modifier.height(4.dp))

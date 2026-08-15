@@ -1,10 +1,6 @@
 # Alive-echo / CodeCompanion
 
-App Android + compile-server PC.
+- **APK**: AI + compilazione/esecuzione **nell'app** (Python, JavaScript)
+- **PC opzionale**: `compile-server/` solo per Java/Kotlin
 
-- AI e modelli: sul **telefono** (APK)
-- Compilazione automatica: sul **PC** (`compile-server/`)
-
-Vedi:
-- [`android-app/README.md`](android-app/README.md)
-- [`compile-server/README.md`](compile-server/README.md)
+Vedi [`android-app/README.md`](android-app/README.md).

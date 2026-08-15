@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeCompanion Local Runtime</title>
+  <script src="skulpt.min.js"></script>
+  <script src="skulpt-stdlib.js"></script>
+</head>
+<body>
+  <div id="status">Runtime locale in avvio…</div>
+  <script>
+    (function () {
+      function bridge(fn, arg) {
+        try {
+          if (window.LocalBridge && typeof window.LocalBridge[fn] === "function") {
+            window.LocalBridge[fn](String(arg));
+          }
+        } catch (e) {}
+      }
+
+      function setStatus(msg) {
+        document.getElementById("status").textContent = msg;
+        bridge("onStatus", msg);
+      }
+
+      function builtinRead(x) {
+        if (Sk.builtinFiles === undefined || Sk.builtinFiles["files"][x] === undefined) {
+          throw "File not found: '" + x + "'";
+        }
+        return Sk.builtinFiles["files"][x];
+      }
+
+      window.runPython = function (code) {
+        return new Promise(function (resolve) {
+          var stdout = [];
+          var stderr = [];
+          try {
+            Sk.configure({
+              output: function (text) { stdout.push(String(text)); },
+              read: builtinRead,
+              execLimit: 20000,
+              killableWhile: true,
+              killableFor: true,
+            });
+            var module = Sk.misceval.asyncToPromise(function () {
+              return Sk.importMainWithBody("<stdin>", false, code, true);
+            });
+            module.then(
+              function () {
+                resolve(JSON.stringify({
+                  ok: true,
+                  exitCode: 0,
+                  stdout: stdout.join(""),
+                  stderr: stderr.join(""),
+                  language: "python",
+                  phase: "local",
+                }));
+              },
+              function (err) {
+                var msg = err.toString();
+                if (err.traceback) msg += "\n" + err.traceback;
+                resolve(JSON.stringify({
+                  ok: false,
+                  exitCode: 1,
+                  stdout: stdout.join(""),
+                  stderr: msg,
+                  language: "python",
+                  phase: "local",
+                }));
+              }
+            );
+          } catch (e) {
+            resolve(JSON.stringify({
+              ok: false,
+              exitCode: 1,
+              stdout: stdout.join(""),
+              stderr: String(e),
+              language: "python",
+              phase: "local",
+            }));
+          }
+        });
+      };
+
+      window.runJavaScript = function (code) {
+        return new Promise(function (resolve) {
+          var logs = [];
+          var errors = [];
+          var originalLog = console.log;
+          var originalError = console.error;
+          var originalWarn = console.warn;
+          console.log = function () {
+            logs.push(Array.prototype.slice.call(arguments).map(String).join(" "));
+          };
+          console.error = function () {
+            errors.push(Array.prototype.slice.call(arguments).map(String).join(" "));
+          };
+          console.warn = function () {
+            logs.push(Array.prototype.slice.call(arguments).map(String).join(" "));
+          };
+          try {
+            var AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+            var fn = new AsyncFunction(code);
+            Promise.resolve(fn()).then(
+              function (result) {
+                console.log = originalLog;
+                console.error = originalError;
+                console.warn = originalWarn;
+                var out = logs.join("\n");
+                if (result !== undefined) {
+                  out = (out ? out + "\n" : "") + String(result);
+                }
+                resolve(JSON.stringify({
+                  ok: errors.length === 0,
+                  exitCode: errors.length === 0 ? 0 : 1,
+                  stdout: out,
+                  stderr: errors.join("\n"),
+                  language: "javascript",
+                  phase: "local",
+                }));
+              },
+              function (err) {
+                console.log = originalLog;
+                console.error = originalError;
+                console.warn = originalWarn;
+                resolve(JSON.stringify({
+                  ok: false,
+                  exitCode: 1,
+                  stdout: logs.join("\n"),
+                  stderr: String(err && err.stack ? err.stack : err),
+                  language: "javascript",
+                  phase: "local",
+                }));
+              }
+            );
+          } catch (e) {
+            console.log = originalLog;
+            console.error = originalError;
+            console.warn = originalWarn;
+            resolve(JSON.stringify({
+              ok: false,
+              exitCode: 1,
+              stdout: logs.join("\n"),
+              stderr: String(e && e.stack ? e.stack : e),
+              language: "javascript",
+              phase: "local",
+            }));
+          }
+        });
+      };
+
+      window.runCode = function (language, code) {
+        var lang = String(language || "").toLowerCase();
+        if (lang === "python" || lang === "py") return window.runPython(code);
+        if (lang === "javascript" || lang === "js" || lang === "node") return window.runJavaScript(code);
+        return Promise.resolve(JSON.stringify({
+          ok: false,
+          exitCode: 1,
+          stdout: "",
+          stderr: "Sul telefono sono supportati solo Python e JavaScript. Java/Kotlin richiedono il PC.",
+          language: lang,
+          phase: "local",
+        }));
+      };
+
+      setStatus("Runtime locale pronto (Python + JavaScript)");
+      bridge("onReady", "ok");
+    })();
+  </script>
+</body>
+</html>

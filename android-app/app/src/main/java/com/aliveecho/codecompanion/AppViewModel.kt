@@ -8,6 +8,7 @@ import com.aliveecho.codecompanion.data.CompileClient
 import com.aliveecho.codecompanion.data.CompileResult
 import com.aliveecho.codecompanion.data.ModelDownloader
 import com.aliveecho.codecompanion.inference.InferenceEngine
+import com.aliveecho.codecompanion.runtime.LocalRuntimeEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -23,6 +24,11 @@ data class ChatMessage(
     val content: String,
 )
 
+enum class CompileMode {
+    LOCAL,
+    REMOTE,
+}
+
 data class AppUiState(
     val code: String = DEFAULT_CODE,
     val language: String = "python",
@@ -30,17 +36,19 @@ data class AppUiState(
     val messages: List<ChatMessage> = listOf(
         ChatMessage(
             role = "assistant",
-            content = "Ciao! 1) Avvia il compile-server sul PC 2) Imposta l'URL in Build 3) Carica un modello 4) Scrivi codice: la compilazione parte in automatico.",
+            content = "Ciao! La compilazione gira DENTRO l'app (Python e JavaScript). Carica un modello, scrivi codice: parte in automatico.",
         ),
     ),
     val selectedModelId: String? = null,
     val loadedModelLabel: String? = null,
     val engineStatus: String = "Avvio motore…",
     val engineReady: Boolean = false,
+    val localRuntimeReady: Boolean = false,
     val busy: Boolean = false,
     val downloadProgress: Map<String, Float> = emptyMap(),
     val downloadedIds: Set<String> = emptySet(),
     val error: String? = null,
+    val compileMode: CompileMode = CompileMode.LOCAL,
     val compileServerUrl: String = "http://192.168.1.1:8765",
     val autoCompile: Boolean = true,
     val autoFixOnError: Boolean = true,
@@ -51,11 +59,10 @@ data class AppUiState(
     val compileLog: String = "Nessuna compilazione ancora.",
 )
 
-private const val DEFAULT_CODE = """def greet(name: str) -> str:
+private const val DEFAULT_CODE = """def greet(name):
     return "Ciao, " + name + "!"
 
-if __name__ == "__main__":
-    print(greet("mondo"))
+print(greet("mondo"))
 """
 
 private const val PREFS = "codecompanion"
@@ -63,9 +70,11 @@ private const val KEY_SERVER = "compile_server_url"
 private const val KEY_AUTO = "auto_compile"
 private const val KEY_AUTO_FIX = "auto_fix"
 private const val KEY_LANG = "language"
+private const val KEY_MODE = "compile_mode"
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     val engine = InferenceEngine(application)
+    val localRuntime = LocalRuntimeEngine()
     private val downloader = ModelDownloader(application.filesDir.resolve("models"))
     private val compileClient = CompileClient()
     private val prefs = application.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -77,6 +86,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             autoCompile = prefs.getBoolean(KEY_AUTO, true),
             autoFixOnError = prefs.getBoolean(KEY_AUTO_FIX, true),
             language = prefs.getString(KEY_LANG, "python") ?: "python",
+            compileMode = if (prefs.getString(KEY_MODE, "local") == "remote") {
+                CompileMode.REMOTE
+            } else {
+                CompileMode.LOCAL
+            },
         ),
     )
     val ui: StateFlow<AppUiState> = _ui.asStateFlow()
@@ -102,6 +116,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
+            localRuntime.ready.collect { ready ->
+                _ui.update { it.copy(localRuntimeReady = ready) }
+                if (ready && _ui.value.autoCompile) {
+                    scheduleCompile(immediate = true)
+                }
+            }
+        }
+        viewModelScope.launch {
             engine.tokenStream.collect { partial ->
                 _ui.update { state ->
                     val msgs = state.messages.toMutableList()
@@ -114,8 +136,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        checkServer()
-        scheduleCompile(immediate = false)
     }
 
     fun updateCode(code: String) {
@@ -140,6 +160,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun updateServerUrl(url: String) {
         prefs.edit().putString(KEY_SERVER, url).apply()
         _ui.update { it.copy(compileServerUrl = url) }
+    }
+
+    fun setCompileMode(mode: CompileMode) {
+        prefs.edit().putString(KEY_MODE, if (mode == CompileMode.LOCAL) "local" else "remote").apply()
+        _ui.update { it.copy(compileMode = mode) }
+        if (_ui.value.autoCompile) {
+            scheduleCompile(immediate = true)
+        }
     }
 
     fun setAutoCompile(enabled: Boolean) {
@@ -178,9 +206,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     serverOnline = ok,
                     serverTools = detail,
                     compileLog = if (ok) {
-                        "Server online. Tool: $detail"
+                        "Server PC online. Tool: $detail"
                     } else {
-                        "Server offline: $detail\nAvvia: python3 compile-server/server.py"
+                        "Server PC offline: $detail"
                     },
                 )
             }
@@ -262,7 +290,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _ui.update { uiState ->
                     val msgs = uiState.messages.toMutableList()
                     if (msgs.isNotEmpty() && msgs.last().role == "assistant") {
-                        msgs[msgs.lastIndex] = ChatMessage("assistant", answer.ifBlank { "(nessuna risposta)" })
+                        msgs[msgs.lastIndex] = ChatMessage(
+                            "assistant",
+                            answer.ifBlank { "(nessuna risposta)" },
+                        )
                     }
                     val newCode = extracted?.first
                     val newLang = extracted?.second
@@ -277,13 +308,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     prefs.edit().putString(KEY_LANG, _ui.value.language).apply()
                     scheduleCompile(immediate = true, allowAutoFix = !fromAutoFix)
                 }
-                if (fromAutoFix) {
-                    autoFixInFlight = false
-                }
+                if (fromAutoFix) autoFixInFlight = false
             } catch (e: Exception) {
-                if (fromAutoFix) {
-                    autoFixInFlight = false
-                }
+                if (fromAutoFix) autoFixInFlight = false
                 _ui.update {
                     it.copy(
                         busy = false,
@@ -301,7 +328,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun scheduleCompile(immediate: Boolean, allowAutoFix: Boolean = true) {
         compileJob?.cancel()
         compileJob = viewModelScope.launch {
-            if (!immediate) delay(900)
+            if (!immediate) delay(700)
             runCompile(allowAutoFix = allowAutoFix)
         }
     }
@@ -310,11 +337,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val state = _ui.value
         if (state.code.isBlank()) return
         _ui.update { it.copy(compiling = true) }
-        val result = withContext(Dispatchers.IO) {
-            compileClient.compile(state.compileServerUrl, state.language, state.code)
+
+        val result = when (state.compileMode) {
+            CompileMode.LOCAL -> {
+                if (state.language !in listOf("python", "javascript")) {
+                    CompileResult(
+                        ok = false,
+                        exitCode = 1,
+                        stdout = "",
+                        stderr = "In modalità App sono supportati Python e JavaScript. Cambia linguaggio oppure attiva modalità PC per Java/Kotlin.",
+                        durationMs = 0,
+                        language = state.language,
+                        phase = "local",
+                    )
+                } else {
+                    localRuntime.run(state.language, state.code)
+                }
+            }
+            CompileMode.REMOTE -> withContext(Dispatchers.IO) {
+                compileClient.compile(state.compileServerUrl, state.language, state.code)
+            }
         }
+
+        val where = if (state.compileMode == CompileMode.LOCAL) "APP" else "PC"
         val log = buildString {
             append(if (result.ok) "OK" else "ERRORE")
+            append(" · $where")
             append(" · exit ${result.exitCode}")
             append(" · ${result.durationMs} ms")
             append(" · ${result.language ?: state.language}")
@@ -340,7 +388,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ) {
             autoFixInFlight = true
             val fixPrompt = buildString {
-                appendLine("Il codice non compila/esegue. Correggilo.")
+                appendLine("Il codice non compila/esegue nell'app. Correggilo.")
                 appendLine("Linguaggio: ${state.language}")
                 appendLine("Errori:")
                 appendLine(result.combinedOutput)
@@ -369,7 +417,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return """
             Sei un assistente di programmazione. Rispondi in italiano.
             Quando proponi una modifica, includi SEMPRE il file completo in un blocco ```linguaggio.
-            Preferisci codice eseguibile e corretto.
+            Preferisci Python o JavaScript perché possono essere eseguiti DENTRO l'app Android.
 
             CODICE APERTO:
             ```

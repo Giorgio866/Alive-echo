@@ -1,11 +1,17 @@
 # CodeCompanion
 
-App Android con AI locale (Hugging Face GGUF) + **compilazione automatica** via PC.
+App Android con AI locale + **compilazione/esecuzione DENTRO l'app**.
 
-## Architettura
+## Cosa gira sul telefono
 
-- **APK**: editor, chat, modelli, auto-compile client
-- **PC**: `compile-server/server.py` compila/esegue codice
+- Editor + chat AI (modelli HF GGUF)
+- Esecuzione automatica:
+  - **Python** (Skulpt)
+  - **JavaScript** (WebView)
+
+## Opzionale
+
+Modalità **PC** per Java/Kotlin (`compile-server/`).
 
 ## Build APK
 
@@ -15,20 +21,11 @@ export ANDROID_HOME=$HOME/android-sdk
 ./gradlew assembleDebug
 ```
 
-Output: `app/build/outputs/apk/debug/app-debug.apk`
+APK: `app/build/outputs/apk/debug/app-debug.apk`
 
-## Setup compilazione
+## Uso
 
-1. Sul PC:
-   ```bash
-   python3 compile-server/server.py
-   ```
-2. Nell'app → scheda **Build** → URL tipo `http://IP_DEL_PC:8765`
-3. Attiva **Auto-compile** (già on) e opzionale **Auto-fix AI**
-
-## Flusso
-
-1. Scrivi codice nell'Editor (o chiedi all'AI)
-2. L'app invia il codice al PC
-3. Vedi output/errori sotto l'editor
-4. Se fallisce e Auto-fix è on, l'AI prova a correggere
+1. Installa l'APK
+2. Scheda **Build** → modalità **Nell'app** (default)
+3. Scrivi Python/JS → auto-compile
+4. Carica un modello HF per l'AI
