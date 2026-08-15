@@ -7,6 +7,7 @@ import '../../data/models/ingredient_models.dart';
 import '../../data/models/product_lot.dart';
 import '../../providers/app_providers.dart';
 import '../../services/lot_label_ocr_service.dart';
+import '../../services/vision_label_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -227,14 +228,20 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
       final visionReady = await ref.read(visionModelServiceProvider).isReady();
       LotLabelOcrResult result;
       if (visionReady) {
-        setState(() => _ocrNote = 'Vision AI (SmolVLM) in lettura…');
+        setState(() => _ocrNote = 'OCR + Vision AI (SmolVLM2-2.2B)…');
         try {
-          result = await ref.read(visionLabelServiceProvider).readLabelImage(path);
+          final ocr = await ref.read(lotLabelOcrServiceProvider).readFromFile(path);
           if (!mounted) return;
-          _applyOcr(result, source: 'Vision AI SmolVLM');
+          setState(() => _ocrNote = 'Vision AI in lettura etichetta…');
+          final vision = await ref.read(visionLabelServiceProvider).readLabelImage(
+                path,
+                ocrHint: ocr.rawText,
+              );
+          if (!mounted) return;
+          result = VisionLabelService.mergeWithOcr(vision, ocr);
+          _applyOcr(result, source: 'Vision AI SmolVLM2-2.2B + OCR');
           return;
         } catch (visionErr) {
-          // Fallback OCR se il modello fallisce (RAM, .so, ecc.)
           if (mounted) {
             setState(() => _ocrNote = 'Vision fallita ($visionErr). Provo OCR…');
           }
@@ -246,7 +253,7 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
         result,
         source: visionReady
             ? 'OCR (fallback dopo Vision)'
-            : 'OCR (per migliore precisione: Impostazioni → Scarica Vision AI)',
+            : 'OCR (per migliore precisione: Impostazioni → Scarica Vision AI 2.2B)',
       );
     } catch (e) {
       if (mounted) {

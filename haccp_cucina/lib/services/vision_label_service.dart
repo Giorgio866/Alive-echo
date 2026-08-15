@@ -7,12 +7,14 @@ import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'lot_label_ocr_service.dart';
 import 'vision_model_service.dart';
 
-/// Legge etichette alimentari con SmolVLM on-device (visione vera, non solo OCR).
+/// Legge etichette alimentari con SmolVLM2-2.2B on-device.
+/// Opzionale: [ocrHint] (testo ML Kit) guida il modello su lotto/scadenza.
 class VisionLabelService {
   VisionLabelService({VisionModelService? models}) : _models = models ?? VisionModelService();
 
   final VisionModelService _models;
   LlamaEngine? _engine;
+  String? _loadedModelPath;
 
   Future<bool> get isReady => _models.isReady();
 
@@ -21,63 +23,86 @@ class VisionLabelService {
   }
 
   Future<void> _ensureEngine() async {
-    if (_engine != null) return;
     if (kIsWeb) throw UnsupportedError('Vision AI non disponibile sul web');
     if (!await _models.isReady()) {
-      throw StateError('Scarica prima SmolVLM da Impostazioni → Vision AI');
+      throw StateError('Scarica prima SmolVLM2 da Impostazioni → Vision AI');
     }
     if (!Platform.isAndroid && !Platform.isLinux && !Platform.isMacOS) {
       throw UnsupportedError('Vision AI supportata su Android (e desktop di sviluppo)');
     }
 
-    // Su Android l'AAR espone le .so nel path JNI: basta il basename.
-    final libraryPath = Platform.isAndroid ? 'libllama.so' : 'libllama.so';
+    final modelPath = await _models.modelPath();
+    if (_engine != null && _loadedModelPath == modelPath) return;
+    await dispose();
+
+    final threads = Platform.numberOfProcessors.clamp(2, 6);
 
     _engine = await LlamaEngine.spawn(
-      libraryPath: libraryPath,
+      libraryPath: 'libllama.so',
       modelParams: ModelParams(
-        path: await _models.modelPath(),
+        path: modelPath,
         gpuLayers: 0,
       ),
-      contextParams: const ContextParams(
-        nCtx: 2048,
+      contextParams: ContextParams(
+        nCtx: 4096,
         nBatch: 512,
+        nThreads: threads,
+        nThreadsBatch: threads,
       ),
       multimodalParams: MultimodalParams(
         mmprojPath: await _models.mmprojPath(),
         useGpu: false,
-        nThreads: 4,
+        nThreads: threads,
         warmup: false,
       ),
     );
+    _loadedModelPath = modelPath;
 
     if (!_engine!.multimodalLoaded) {
-      await _engine!.dispose();
-      _engine = null;
+      await dispose();
       throw StateError(
         'libmtmd non caricata: Vision AI non disponibile su questo dispositivo',
       );
     }
   }
 
-  Future<LotLabelOcrResult> readLabelImage(String imagePath) async {
+  Future<LotLabelOcrResult> readLabelImage(
+    String imagePath, {
+    String? ocrHint,
+  }) async {
     await _ensureEngine();
     final engine = _engine!;
     final chat = await engine.createChat();
 
-    const system =
-        'You extract data from Italian food packaging labels. Reply with ONLY valid JSON, no markdown.';
-    const userText = '''
-Read this food product label photo and extract:
-- productName: brand + product name (e.g. TASTASAL AL NATURALE)
-- lotCode: value after LOTTO / LOTTO n. (e.g. L6071318005). Never invent fragments like ATTE from LATTE.
-- expiryAt: date after "Da consumare entro" as YYYY-MM-DD (handle 02 08 26 as 2026-08-02)
-- supplier: producer/stabilimento if present else null
-- allergens: only if the label says allergens are PRESENT. If it says SENZA GLUTINE / SENZA LATTE, use "Nessuno (senza glutine/latte)".
-- ingredients: list of individual ingredients from INGREDIENTI section
+    const system = '''
+Sei un assistente HACCP per etichette alimentari italiane.
+Rispondi SOLO con JSON valido (niente markdown, niente testo extra).
+Regole:
+1) lotCode = valore dopo LOTTO / Lotto n. / LOT (es. L6071318005). Non inventare frammenti da LATTE (ATTE), GLUTINE, ecc.
+2) expiryAt = data dopo "Da consumare entro" / "Scad." in YYYY-MM-DD. "02 08 26" o "02.08.26" → 2026-08-02.
+3) allergens: se c'è "SENZA GLUTINE" / "SENZA LATTE" / "senza derivati del latte" → "Nessuno (senza glutine/latte)". Solo allergeni PRESENTI.
+4) productName = marca + nome prodotto, senza ingredienti.
+5) ingredients = lista dalla sezione INGREDIENTI, elementi singoli.
+''';
 
-JSON schema:
-{"productName":"","lotCode":"","expiryAt":"YYYY-MM-DD or null","supplier":null,"allergens":null,"ingredients":[]}
+    final hintBlock = (ocrHint != null && ocrHint.trim().isNotEmpty)
+        ? '''
+
+Testo OCR di supporto (può contenere errori; preferisci ciò che vedi nell'immagine per lotto e date):
+---
+${ocrHint.trim()}
+---
+'''
+        : '';
+
+    final userText = '''
+Estrai i campi da questa foto di etichetta alimentare.
+$hintBlock
+Esempio output:
+{"productName":"TASTASAL AL NATURALE","lotCode":"L6071318005","expiryAt":"2026-08-02","supplier":null,"allergens":"Nessuno (senza glutine/latte)","ingredients":["carne di suino","sale","aromi naturali"]}
+
+Schema:
+{"productName":"","lotCode":"","expiryAt":"YYYY-MM-DD o null","supplier":null,"allergens":null,"ingredients":[]}
 ''';
 
     try {
@@ -89,8 +114,8 @@ JSON schema:
 
       final buf = StringBuffer();
       await for (final event in chat.generate(
-        maxTokens: 256,
-        sampler: const SamplerParams(temperature: 0.1, topP: 0.9),
+        maxTokens: 384,
+        sampler: const SamplerParams(temperature: 0.05, topP: 0.85),
       )) {
         switch (event) {
           case TokenEvent():
@@ -157,8 +182,57 @@ JSON schema:
     }
   }
 
+  /// Unisce Vision + OCR: Vision per semantica, OCR per codici letterali se Vision fallisce.
+  static LotLabelOcrResult mergeWithOcr(LotLabelOcrResult vision, LotLabelOcrResult ocr) {
+    String? pick(String? a, String? b) {
+      if (a != null && a.trim().isNotEmpty) return a.trim();
+      if (b != null && b.trim().isNotEmpty) return b.trim();
+      return null;
+    }
+
+    final lot = _preferLotCode(vision.lotCode, ocr.lotCode);
+    final allergens = _preferAllergens(vision.allergens, ocr.allergens);
+    final ingredients = vision.ingredients.isNotEmpty ? vision.ingredients : ocr.ingredients;
+
+    return LotLabelOcrResult(
+      productName: pick(vision.productName, ocr.productName),
+      lotCode: lot,
+      supplier: pick(vision.supplier, ocr.supplier),
+      expiryAt: vision.expiryAt ?? ocr.expiryAt,
+      allergens: allergens,
+      ingredients: ingredients,
+      rawText: 'VISION:\n${vision.rawText}\n\nOCR:\n${ocr.rawText}',
+    );
+  }
+
+  static String? _preferLotCode(String? vision, String? ocr) {
+    bool looksReal(String? c) {
+      if (c == null) return false;
+      final s = c.trim().toUpperCase();
+      if (s.length < 5) return false;
+      // Scarta frammenti tipici da parole (LATTE→ATTE, GLUTINE→…)
+      const bad = {'ATTE', 'LATTE', 'GLUTINE', 'SALE', 'ACQUA', 'CARNE'};
+      if (bad.contains(s)) return false;
+      return RegExp(r'^[A-Z0-9][A-Z0-9./-]{4,}$').hasMatch(s);
+    }
+
+    if (looksReal(vision)) return vision!.trim().toUpperCase();
+    if (looksReal(ocr)) return ocr!.trim().toUpperCase();
+    return vision?.trim().toUpperCase() ?? ocr?.trim().toUpperCase();
+  }
+
+  static String? _preferAllergens(String? vision, String? ocr) {
+    final v = vision?.toLowerCase() ?? '';
+    final o = ocr?.toLowerCase() ?? '';
+    if (v.contains('nessuno') || v.contains('senza')) return vision;
+    if (o.contains('nessuno') || o.contains('senza')) return ocr;
+    if (vision != null && vision.trim().isNotEmpty) return vision;
+    return ocr;
+  }
+
   Future<void> dispose() async {
     await _engine?.dispose();
     _engine = null;
+    _loadedModelPath = null;
   }
 }

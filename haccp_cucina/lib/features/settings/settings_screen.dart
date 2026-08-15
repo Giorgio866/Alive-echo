@@ -367,8 +367,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Text('Vision AI on-device', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 6),
           Text(
-            'Scarica SmolVLM-256M da Hugging Face (~280 MB). Legge le etichette con visione vera '
-            '(non solo OCR). Serve WiFi una volta; poi funziona offline.',
+            'Scarica SmolVLM2-2.2B da Hugging Face (${VisionModelService.approxSizeLabel}). '
+            'Modello molto più capace del 256M: legge etichette con visione + OCR. '
+            'Serve WiFi una volta; poi funziona offline (su telefoni con ≥6 GB RAM).',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
           ),
           const SizedBox(height: 10),
@@ -388,11 +389,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ready ? Icons.visibility : Icons.cloud_download_outlined,
                           color: AppColors.teal,
                         ),
-                        title: Text(ready ? 'SmolVLM-256M pronto' : 'Modello non scaricato'),
+                        title: Text(
+                          ready
+                              ? '${VisionModelService.displayName} pronto'
+                              : 'Modello non scaricato',
+                        ),
                         subtitle: Text(
                           ready
-                              ? 'ggml-org/SmolVLM-256M-Instruct-GGUF'
-                              : 'Tocca per scaricare da Hugging Face',
+                              ? VisionModelService.modelId
+                              : 'Tocca per scaricare da Hugging Face (${VisionModelService.approxSizeLabel})',
                         ),
                       ),
                       if (_visionProgress != null) ...[
@@ -411,11 +416,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                 )
                               : const Icon(Icons.download),
-                          label: Text(_visionDownloading ? 'Download…' : 'Scarica Vision AI'),
+                          label: Text(_visionDownloading ? 'Download…' : 'Scarica Vision AI 2.2B'),
                         )
                       else
                         OutlinedButton.icon(
                           onPressed: () async {
+                            await ref.read(visionLabelServiceProvider).dispose();
                             await ref.read(visionModelServiceProvider).deleteModel();
                             ref.invalidate(visionModelReadyProvider);
                             if (!mounted) return;
@@ -458,7 +464,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ref.invalidate(visionModelReadyProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vision AI installata. Usa Scansiona lotto.')),
+        const SnackBar(content: Text('Vision AI 2.2B installata. Usa Scansiona lotto.')),
       );
     } catch (e) {
       if (!mounted) return;
