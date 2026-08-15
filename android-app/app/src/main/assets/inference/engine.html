@@ -84,13 +84,27 @@
       return new Blob(chunks);
     }
 
-    window.loadModel = async function (repo, file) {
+    window.loadModel = async function (repo, file, localUrl) {
       if (!wllama) throw new Error("Motore non pronto");
-      setStatus("Download modello da Hugging Face…");
-      log("HF: " + repo + " / " + file);
-      const url = "https://huggingface.co/" + repo + "/resolve/main/" + file;
-      const blob = await downloadBlob(url);
-      setStatus("Caricamento in memoria…");
+      const hfUrl = "https://huggingface.co/" + repo + "/resolve/main/" + file;
+      const preferred = (localUrl && String(localUrl).trim()) ? String(localUrl).trim() : hfUrl;
+      setStatus("Carico modello…");
+      log("URL: " + preferred);
+      let blob;
+      try {
+        blob = await downloadBlob(preferred);
+      } catch (e) {
+        if (preferred !== hfUrl) {
+          setStatus("File locale non letto, scarico da Hugging Face…");
+          blob = await downloadBlob(hfUrl);
+        } else {
+          throw e;
+        }
+      }
+      if (!blob || blob.size < 1024) {
+        throw new Error("File modello vuoto o troppo piccolo");
+      }
+      setStatus("Caricamento in memoria (" + Math.round(blob.size / (1024 * 1024)) + " MB)…");
       await wllama.loadModel([blob], {
         n_ctx: 2048,
         n_threads: 1,

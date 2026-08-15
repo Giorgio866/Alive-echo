@@ -17,9 +17,12 @@ import com.aliveecho.codecompanion.runtime.LocalRuntimeEngine
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.aliveecho.codecompanion.web.AssetWebView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -303,12 +306,39 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _ui.update { it.copy(busy = true, error = null, selectedModelId = model.id) }
             try {
-                engine.loadModel(model.repo, model.file)
+                if (!downloader.isDownloaded(model.repo, model.file)) {
+                    withContext(Dispatchers.IO) {
+                        downloader.download(model.repo, model.file) { p ->
+                            val fraction = if (p.totalBytes > 0) {
+                                p.bytesRead.toFloat() / p.totalBytes.toFloat()
+                            } else {
+                                0f
+                            }
+                            _ui.update { state ->
+                                state.copy(
+                                    downloadProgress = state.downloadProgress + (model.id to fraction),
+                                )
+                            }
+                        }
+                    }
+                    refreshDownloaded()
+                }
+                val local = downloader.localFile(model.repo, model.file)
+                val localUrl = if (local.exists() && local.length() > 0L) {
+                    AssetWebView.modelUrl(local.name)
+                } else {
+                    null
+                }
+                withTimeout(8 * 60 * 1000L) {
+                    engine.loadModel(model.repo, model.file, localUrl)
+                }
                 _ui.update {
                     it.copy(
                         loadedModelLabel = "${model.name} (${model.repo}/${model.file})",
                     )
                 }
+            } catch (e: TimeoutCancellationException) {
+                _ui.update { it.copy(error = "Caricamento troppo lento. Riprova con un modello più piccolo (1B–3B).") }
             } catch (e: Exception) {
                 _ui.update { it.copy(error = e.message ?: "Caricamento modello fallito") }
             } finally {
@@ -352,23 +382,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pickHfRepo(hit: HfSearchHit) {
         viewModelScope.launch {
-            _ui.update { it.copy(busy = true, error = null) }
+            _ui.update { it.copy(hfSearching = true, error = null, selectedHfRepo = hit.repoId) }
             try {
                 val files = withContext(Dispatchers.IO) {
                     hfApi.listFiles(hit.repoId, _ui.value.hfToken.ifBlank { null })
                 }
+                val gguf = files.filter { it.endsWith(".gguf", ignoreCase = true) }
                 val model = hfApi.toModelFromRepo(hit.repoId, null, hit.pipelineTag, files)
                 rememberCustom(model)
                 _ui.update {
                     it.copy(
-                        hfFiles = files.filter { name -> name.endsWith(".gguf", true) },
+                        hfFiles = gguf,
                         selectedHfRepo = hit.repoId,
+                        hfSearching = false,
                     )
                 }
             } catch (e: Exception) {
-                _ui.update { it.copy(error = e.message ?: "Impossibile leggere il repo") }
-            } finally {
-                _ui.update { it.copy(busy = false) }
+                _ui.update {
+                    it.copy(
+                        hfSearching = false,
+                        error = e.message ?: "Impossibile leggere il repo",
+                    )
+                }
             }
         }
     }
@@ -376,15 +411,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun addCustomGguf(repo: String, file: String) {
         val model = HfModel(
             id = "custom-" + repo.replace('/', '_') + "-" + file.hashCode(),
-            name = repo.substringAfterLast('/'),
+            name = repo.substringAfterLast('/') + " / " + file.substringAfterLast('/'),
             repo = repo.trim(),
             file = file.trim(),
-            sizeLabel = "custom",
+            sizeLabel = "GGUF",
             description = "Modello scelto da Hugging Face",
             tags = listOf("custom"),
-            kind = if (file.endsWith(".gguf", true)) ModelKind.LLM else ModelKind.IMAGE,
+            kind = ModelKind.LLM,
         )
         rememberCustom(model)
+        downloadModel(model)
     }
 
     fun loadImageModel(model: HfModel) {

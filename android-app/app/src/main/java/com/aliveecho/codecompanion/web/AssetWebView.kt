@@ -8,18 +8,31 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
+import java.io.File
 
 object AssetWebView {
     const val ORIGIN = "https://appassets.androidplatform.net"
 
     fun assetUrl(path: String): String = "$ORIGIN/assets/$path"
 
+    fun modelUrl(fileName: String): String = "$ORIGIN/models/$fileName"
+
     @SuppressLint("SetJavaScriptEnabled")
     fun configure(context: Context, webView: WebView) {
-        val loader = WebViewAssetLoader.Builder()
+        val app = context.applicationContext
+        val modelsDir = File(app.filesDir, "models").apply { mkdirs() }
+        val builder = WebViewAssetLoader.Builder()
             .setDomain("appassets.androidplatform.net")
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context.applicationContext))
-            .build()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(app))
+        try {
+            builder.addPathHandler(
+                "/models/",
+                WebViewAssetLoader.InternalStoragePathHandler(app, modelsDir),
+            )
+        } catch (_: Exception) {
+            // Some devices reject the path handler; HF fallback still works.
+        }
+        val loader = builder.build()
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true

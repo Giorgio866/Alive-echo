@@ -52,31 +52,36 @@ class InferenceEngine(context: Context) {
         return webView
     }
 
-    suspend fun loadModel(repo: String, file: String): String = withContext(Dispatchers.Main) {
-        val webView = webViewRef.get() ?: error("WebView non pronto")
-        if (!_engineReady.value) error("Motore AI non ancora pronto")
-        suspendCancellableCoroutine { cont ->
-            loadContinuation = { result ->
-                loadContinuation = null
-                result.fold(
-                    onSuccess = { cont.resume(it) },
-                    onFailure = { cont.resumeWithException(it) },
-                )
+    suspend fun loadModel(repo: String, file: String, localUrl: String? = null): String =
+        withContext(Dispatchers.Main) {
+            val webView = webViewRef.get() ?: error("WebView non pronto")
+            if (!_engineReady.value) error("Motore AI non ancora pronto")
+            suspendCancellableCoroutine { cont ->
+                loadContinuation = { result ->
+                    loadContinuation = null
+                    result.fold(
+                        onSuccess = { cont.resume(it) },
+                        onFailure = { cont.resumeWithException(it) },
+                    )
+                }
+                val js = """
+                    (async function(){
+                      try {
+                        const m = await window.loadModel(
+                          ${JSONObject.quote(repo)},
+                          ${JSONObject.quote(file)},
+                          ${JSONObject.quote(localUrl ?: "")}
+                        );
+                        AndroidBridge.onModelLoaded(String(m));
+                      } catch(e) {
+                        AndroidBridge.onError(String(e && e.stack ? e.stack : e));
+                      }
+                    })();
+                """.trimIndent()
+                webView.evaluateJavascript(js, null)
+                cont.invokeOnCancellation { loadContinuation = null }
             }
-            val js = """
-                (async function(){
-                  try {
-                    const m = await window.loadModel(${JSONObject.quote(repo)}, ${JSONObject.quote(file)});
-                    AndroidBridge.onModelLoaded(String(m));
-                  } catch(e) {
-                    AndroidBridge.onError(String(e));
-                  }
-                })();
-            """.trimIndent()
-            webView.evaluateJavascript(js, null)
-            cont.invokeOnCancellation { loadContinuation = null }
         }
-    }
 
     suspend fun complete(prompt: String, maxTokens: Int = 256): String = withContext(Dispatchers.Main) {
         val webView = webViewRef.get() ?: error("WebView non pronto")

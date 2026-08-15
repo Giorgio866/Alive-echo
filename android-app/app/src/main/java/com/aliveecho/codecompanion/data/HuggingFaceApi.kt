@@ -24,8 +24,14 @@ class HuggingFaceApi(
         .build(),
 ) {
     fun search(query: String, token: String? = null, limit: Int = 20): List<HfSearchHit> {
-        val q = URLEncoder.encode(query.trim().ifBlank { "gguf" }, "UTF-8")
-        val url = "https://huggingface.co/api/models?search=$q&limit=$limit&sort=downloads"
+        val raw = query.trim().ifBlank { "gguf" }
+        val q = URLEncoder.encode(raw, "UTF-8")
+        val wantsImage = raw.contains("janus", true) ||
+            raw.contains("onnx", true) ||
+            raw.contains("diffusion", true) ||
+            raw.contains("immagine", true)
+        val filter = if (wantsImage) "" else "&filter=gguf"
+        val url = "https://huggingface.co/api/models?search=$q$filter&limit=$limit&sort=downloads"
         val json = get(url, token)
         val arr = JSONArray(json)
         val out = ArrayList<HfSearchHit>(arr.length())

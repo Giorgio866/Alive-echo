@@ -2,6 +2,7 @@ package com.aliveecho.codecompanion.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -771,10 +772,13 @@ private fun ModelsScreen(
                 Text("Risultati ricerca", fontWeight = FontWeight.SemiBold, color = Ink)
             }
             items(state.hfResults) { hit ->
+                val tooBig = Regex("""(?:[2-9][0-9]|[1-9][0-9]{2,})B""", RegexOption.IGNORE_CASE)
+                    .containsMatchIn(hit.repoId)
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .background(Sand, RoundedCornerShape(12.dp))
+                        .clickable { onPickHfRepo(hit) }
                         .padding(12.dp),
                 ) {
                     Text(hit.repoId, fontWeight = FontWeight.Medium, color = Ink)
@@ -783,11 +787,17 @@ private fun ModelsScreen(
                         color = Smoke,
                         fontSize = 12.sp,
                     )
+                    if (tooBig) {
+                        Text(
+                            "Troppo grande per il telefono (usa 1B–3B).",
+                            color = Color(0xFF8A1F17),
+                            fontSize = 12.sp,
+                        )
+                    }
                     Spacer(Modifier.height(6.dp))
-                    OutlinedButton(
-                        onClick = { onPickHfRepo(hit) },
-                        enabled = !state.busy,
-                    ) { Text("Usa questo repo") }
+                    OutlinedButton(onClick = { onPickHfRepo(hit) }) {
+                        Text("Usa questo repo")
+                    }
                 }
             }
         }
@@ -872,7 +882,7 @@ private fun ModelCard(
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!isImage) {
-                OutlinedButton(onClick = onDownload, enabled = !busy) {
+                OutlinedButton(onClick = onDownload) {
                     Icon(Icons.Default.Download, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text(if (downloaded) "Riscarica" else "Scarica")
@@ -880,7 +890,7 @@ private fun ModelCard(
             }
             Button(
                 onClick = onLoad,
-                enabled = !busy && engineReady,
+                enabled = engineReady,
                 colors = ButtonDefaults.buttonColors(containerColor = Moss),
             ) {
                 Icon(if (isImage) Icons.Default.Download else Icons.Default.PlayArrow, contentDescription = null)
