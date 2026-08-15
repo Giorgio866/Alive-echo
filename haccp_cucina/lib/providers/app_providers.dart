@@ -8,6 +8,7 @@ import '../data/models/temperature_models.dart';
 import '../data/repositories/haccp_repository.dart';
 import '../services/document_scan_service.dart';
 import '../services/expiry_notification_service.dart';
+import '../services/menu_catalog_import_service.dart';
 import '../services/monthly_archive_service.dart';
 import '../services/pdf_export_service.dart';
 import '../services/settings_service.dart';
@@ -36,6 +37,12 @@ final expiryNotificationServiceProvider = Provider<ExpiryNotificationService>((r
 
 final temperatureOcrServiceProvider = Provider<TemperatureOcrService>((ref) {
   final service = TemperatureOcrService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+final menuCatalogImportServiceProvider = Provider<MenuCatalogImportService>((ref) {
+  final service = MenuCatalogImportService();
   ref.onDispose(service.dispose);
   return service;
 });

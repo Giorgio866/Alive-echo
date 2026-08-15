@@ -5,8 +5,10 @@ import 'package:intl/intl.dart';
 import '../../data/models/document_models.dart';
 import '../../data/models/ingredient_models.dart';
 import '../../providers/app_providers.dart';
+import '../../services/menu_catalog_import_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/menu_import_review_sheet.dart';
 
 class IngredientsScreen extends ConsumerStatefulWidget {
   const IngredientsScreen({super.key});
@@ -223,13 +225,72 @@ class _ActiveBatchesTab extends ConsumerWidget {
   }
 }
 
-class _CatalogTab extends ConsumerWidget {
+class _CatalogTab extends ConsumerStatefulWidget {
   const _CatalogTab({required this.onPrepared});
 
   final VoidCallback onPrepared;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_CatalogTab> createState() => _CatalogTabState();
+}
+
+class _CatalogTabState extends ConsumerState<_CatalogTab> {
+  bool _busy = false;
+
+  Future<void> _importFromPhoto({required bool fromCamera}) async {
+    setState(() => _busy = true);
+    try {
+      final scan = ref.read(documentScanServiceProvider);
+      final path = fromCamera ? await scan.captureFromCamera() : await scan.pickFromGallery();
+      if (path == null) return;
+      final result = await ref.read(menuCatalogImportServiceProvider).importFromImagePath(path);
+      if (!mounted) return;
+      await _persistImport(result);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import foto fallito: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _importFromPdf() async {
+    setState(() => _busy = true);
+    try {
+      final result = await ref.read(menuCatalogImportServiceProvider).pickAndImportPdf();
+      if (result == null || !mounted) return;
+      await _persistImport(result);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import PDF fallito: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _persistImport(MenuImportResult result) async {
+    final items = await showMenuImportReviewSheet(
+      context: context,
+      result: result,
+      sourceTag: 'menu_import',
+    );
+    if (items == null || items.isEmpty) return;
+    final repo = ref.read(haccpRepositoryProvider);
+    for (final item in items) {
+      await repo.upsertCustomIngredient(item);
+    }
+    ref.invalidate(ingredientCatalogProvider);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${items.length} ingredienti aggiunti al catalogo')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final catalogAsync = ref.watch(ingredientCatalogProvider);
     final settings = ref.watch(settingsProvider);
 
@@ -243,59 +304,114 @@ class _CatalogTab extends ConsumerWidget {
         }
         final categories = grouped.keys.toList()..sort();
 
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          itemCount: categories.length,
-          itemBuilder: (context, cIndex) {
-            final cat = categories[cIndex];
-            final list = grouped[cat]!;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 12, bottom: 6),
-                  child: Text(
-                    _categoryLabel(cat),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.tealDark),
-                  ),
-                ),
-                ...list.map((item) {
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(item.name),
-                    subtitle: Text(
-                      'Scadenza consigliata: ${item.recommendedDays} gg · ${item.storageHint}'
-                      '${item.allergens != null ? '\nAllergeni: ${item.allergens}' : ''}',
-                    ),
-                    isThreeLine: item.allergens != null,
-                    trailing: FilledButton.tonal(
-                      onPressed: () async {
-                        final op = settings.value?.defaultOperator ?? 'Operatore';
-                        final batch = await ref.read(haccpRepositoryProvider).registerPreparedBatch(
-                              ingredient: item,
-                              operatorName: op,
-                            );
-                        await ref.read(expiryNotificationServiceProvider).scheduleBatchExpiry(batch);
-                        ref.invalidate(preparedBatchesProvider);
-                        ref.invalidate(dashboardProvider);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '${item.name}: scadenza ${DateFormat('dd/MM').format(batch.expiresAt)} · notifica attiva',
-                              ),
-                            ),
-                          );
-                        }
-                        onPrepared();
-                      },
-                      child: const Text('Preparo'),
-                    ),
+        return Stack(
+          children: [
+            ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              itemCount: categories.length + 1,
+              itemBuilder: (context, cIndex) {
+                if (cIndex == 0) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Importa dal menu',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.tealDark),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Foto o PDF del menu: l\'app legge i nomi e tu scegli cosa salvare.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.tonalIcon(
+                            onPressed: _busy ? null : () => _importFromPhoto(fromCamera: true),
+                            icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                            label: const Text('Foto menu'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : () => _importFromPhoto(fromCamera: false),
+                            icon: const Icon(Icons.photo_library_outlined, size: 18),
+                            label: const Text('Galleria'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : _importFromPdf,
+                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                            label: const Text('PDF'),
+                          ),
+                        ],
+                      ),
+                      if (items.isEmpty) ...[
+                        const SizedBox(height: 24),
+                        const EmptyState(
+                          icon: Icons.restaurant_menu,
+                          title: 'Catalogo vuoto',
+                          message: 'Importa il menu con foto o PDF, oppure registra i preparati a mano.',
+                        ),
+                      ],
+                    ],
                   );
-                }),
-              ],
-            );
-          },
+                }
+                final cat = categories[cIndex - 1];
+                final list = grouped[cat]!;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12, bottom: 6),
+                      child: Text(
+                        _categoryLabel(cat),
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.tealDark),
+                      ),
+                    ),
+                    ...list.map((item) {
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(item.name),
+                        subtitle: Text(
+                          'Scadenza consigliata: ${item.recommendedDays} gg · ${item.storageHint}'
+                          '${item.allergens != null ? '\nAllergeni: ${item.allergens}' : ''}',
+                        ),
+                        isThreeLine: item.allergens != null,
+                        trailing: FilledButton.tonal(
+                          onPressed: () async {
+                            final op = settings.value?.defaultOperator ?? 'Operatore';
+                            final batch = await ref.read(haccpRepositoryProvider).registerPreparedBatch(
+                                  ingredient: item,
+                                  operatorName: op,
+                                );
+                            await ref.read(expiryNotificationServiceProvider).scheduleBatchExpiry(batch);
+                            ref.invalidate(preparedBatchesProvider);
+                            ref.invalidate(dashboardProvider);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    '${item.name}: scadenza ${DateFormat('dd/MM').format(batch.expiresAt)} · notifica attiva',
+                                  ),
+                                ),
+                              );
+                            }
+                            widget.onPrepared();
+                          },
+                          child: const Text('Preparo'),
+                        ),
+                      );
+                    }),
+                  ],
+                );
+              },
+            ),
+            if (_busy)
+              const ColoredBox(
+                color: Color(0x66000000),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+          ],
         );
       },
     );

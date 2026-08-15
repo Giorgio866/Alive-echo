@@ -9,7 +9,9 @@ import 'package:uuid/uuid.dart';
 import '../../data/models/ingredient_models.dart';
 import '../../data/models/temperature_models.dart';
 import '../../providers/app_providers.dart';
+import '../../services/menu_catalog_import_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/menu_import_review_sheet.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -123,6 +125,59 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   Future<String?> _capturePhoto() async {
     return ref.read(documentScanServiceProvider).captureFromCamera();
+  }
+
+  Future<void> _importMenuFromPhoto({required bool fromCamera}) async {
+    setState(() => _saving = true);
+    try {
+      final scan = ref.read(documentScanServiceProvider);
+      final path = fromCamera ? await scan.captureFromCamera() : await scan.pickFromGallery();
+      if (path == null) return;
+      final result = await ref.read(menuCatalogImportServiceProvider).importFromImagePath(path);
+      if (!mounted) return;
+      await _applyMenuImport(result);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import foto fallito: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _importMenuFromPdf() async {
+    setState(() => _saving = true);
+    try {
+      final result = await ref.read(menuCatalogImportServiceProvider).pickAndImportPdf();
+      if (result == null || !mounted) return;
+      await _applyMenuImport(result);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import PDF fallito: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _applyMenuImport(MenuImportResult result) async {
+    final items = await showMenuImportReviewSheet(
+      context: context,
+      result: result,
+      sourceTag: 'menu_import',
+    );
+    if (items == null || items.isEmpty || !mounted) return;
+    setState(() {
+      for (final item in items) {
+        final draft = _CustomIngredientDraft()
+          ..nameCtrl.text = item.name
+          ..daysCtrl.text = '${item.recommendedDays}';
+        _customIngredients.add(draft);
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${items.length} voci aggiunte dal menu')),
+    );
   }
 
   @override
@@ -301,9 +356,27 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         Text('Il tuo catalogo ingredienti', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 6),
         Text(
-          'Nessun catalogo predefinito: carica i preparati della TUA cucina. '
-          'Scatta una foto a ogni prodotto e imposta i giorni di scadenza.',
+          'Importa il menu con una foto o un PDF, oppure aggiungi i preparati uno per uno. '
+          'Poi controlla i giorni di scadenza.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.slateMuted),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: _saving ? null : () => _importMenuFromPhoto(fromCamera: true),
+          icon: const Icon(Icons.photo_camera_outlined),
+          label: const Text('Importa da foto menu'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _saving ? null : () => _importMenuFromPhoto(fromCamera: false),
+          icon: const Icon(Icons.photo_library_outlined),
+          label: const Text('Importa da foto in galleria'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _saving ? null : _importMenuFromPdf,
+          icon: const Icon(Icons.picture_as_pdf_outlined),
+          label: const Text('Importa da PDF menu'),
         ),
         const SizedBox(height: 16),
         if (_customIngredients.isEmpty)
@@ -315,8 +388,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Text(
-              'Suggerimento: fotografa mozzarella, salse, salumi, impasti gia aperti '
-              'e indica dopo quanti giorni scadono in frigo.',
+              'Suggerimento: fotografa il menu della pizzeria oppure carica il PDF. '
+              'Poi seleziona solo i prodotti che usi in cucina.',
             ),
           ),
         ..._customIngredients.asMap().entries.map((e) {
