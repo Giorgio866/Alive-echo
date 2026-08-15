@@ -8,6 +8,7 @@ import '../data/models/temperature_models.dart';
 import '../data/repositories/haccp_repository.dart';
 import '../services/document_scan_service.dart';
 import '../services/expiry_notification_service.dart';
+import '../services/pdf_export_service.dart';
 import '../services/settings_service.dart';
 import '../services/thermal_print_service.dart';
 
@@ -29,6 +30,10 @@ final settingsServiceProvider = Provider<SettingsService>((ref) {
 
 final expiryNotificationServiceProvider = Provider<ExpiryNotificationService>((ref) {
   return ExpiryNotificationService();
+});
+
+final pdfExportServiceProvider = Provider<PdfExportService>((ref) {
+  return PdfExportService();
 });
 
 final settingsProvider = FutureProvider<AppSettings>((ref) async {

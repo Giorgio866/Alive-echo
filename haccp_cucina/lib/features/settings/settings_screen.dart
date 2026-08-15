@@ -118,6 +118,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         AppSettings(
                           activityName: current.activityName,
                           defaultOperator: current.defaultOperator,
+                          onboardingCompleted: current.onboardingCompleted,
                         ),
                       );
                   ref.invalidate(settingsProvider);

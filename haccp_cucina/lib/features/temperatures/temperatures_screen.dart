@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +25,24 @@ class TemperaturesScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Temperature CCP'),
         actions: [
+          IconButton(
+            tooltip: 'Export PDF',
+            onPressed: () async {
+              final s = settings.value ?? await ref.read(settingsServiceProvider).load();
+              try {
+                await ref.read(pdfExportServiceProvider).exportFromRepository(
+                      repo: ref.read(haccpRepositoryProvider),
+                      activityName: s.activityName,
+                      operatorName: s.defaultOperator,
+                    );
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+                }
+              }
+            },
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+          ),
           IconButton(
             tooltip: 'Storico 30 giorni',
             onPressed: () => context.push('/temperature-history'),
@@ -52,7 +73,7 @@ class TemperaturesScreen extends ConsumerWidget {
             return const EmptyState(
               icon: Icons.thermostat,
               title: 'Nessun punto di misura',
-              message: 'Aggiungi frigoriferi, freezer e banchi caldi da monitorare.',
+              message: 'Completa il setup iniziale o aggiungi i frigoriferi.',
             );
           }
           return ListView.separated(
@@ -85,22 +106,25 @@ class TemperaturesScreen extends ConsumerWidget {
                     point,
                     settings.value?.defaultOperator ?? 'Operatore',
                   ),
+                  onLongPress: () => _changeFridgePhoto(context, ref, point),
                   child: Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppColors.slate.withValues(alpha: 0.08)),
                     ),
                     child: Row(
                       children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: AppColors.tealSoft,
+                        GestureDetector(
+                          onTap: () => _changeFridgePhoto(context, ref, point),
+                          child: ClipRRect(
                             borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 72,
+                              height: 72,
+                              child: _fridgeThumb(point),
+                            ),
                           ),
-                          child: Icon(_zoneIcon(point.zone), color: AppColors.tealDark),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -110,7 +134,8 @@ class TemperaturesScreen extends ConsumerWidget {
                               Text(point.name, style: Theme.of(context).textTheme.titleMedium),
                               const SizedBox(height: 2),
                               Text(
-                                '${point.zone.replaceAll('_', ' ')} · ${point.minC.toStringAsFixed(0)} / ${point.maxC.toStringAsFixed(0)} °C',
+                                '${point.zone == 'freezer' ? 'congelatore' : 'frigo'} · '
+                                '${point.minC.toStringAsFixed(0)} / ${point.maxC.toStringAsFixed(0)} °C',
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: AppColors.slateMuted,
                                     ),
@@ -118,7 +143,9 @@ class TemperaturesScreen extends ConsumerWidget {
                               if (reading != null) ...[
                                 const SizedBox(height: 4),
                                 Text(
-                                  'Ultima: ${reading.valueC.toStringAsFixed(1)} °C · ${DateFormat('HH:mm').format(reading.recordedAt)} · ${reading.operatorName}',
+                                  'Ultima: ${reading.valueC.toStringAsFixed(1)} °C · '
+                                  '${DateFormat('HH:mm').format(reading.recordedAt)}'
+                                  '${reading.photoPath != null ? ' · 📷' : ''}',
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
@@ -138,18 +165,34 @@ class TemperaturesScreen extends ConsumerWidget {
     );
   }
 
-  IconData _zoneIcon(String zone) {
-    return switch (zone) {
-      'freezer' => Icons.ac_unit,
-      'banco_caldo' => Icons.local_fire_department,
-      'abbattitore' => Icons.severe_cold,
-      _ => Icons.kitchen_outlined,
-    };
+  Widget _fridgeThumb(TemperaturePoint point) {
+    if (!kIsWeb && point.photoPath != null && File(point.photoPath!).existsSync()) {
+      return Image.file(File(point.photoPath!), fit: BoxFit.cover);
+    }
+    return ColoredBox(
+      color: AppColors.tealSoft,
+      child: Icon(
+        point.zone == 'freezer' ? Icons.ac_unit : Icons.kitchen_outlined,
+        color: AppColors.tealDark,
+      ),
+    );
   }
 
   bool _isToday(DateTime dt) {
     final now = DateTime.now();
     return dt.year == now.year && dt.month == now.month && dt.day == now.day;
+  }
+
+  Future<void> _changeFridgePhoto(BuildContext context, WidgetRef ref, TemperaturePoint point) async {
+    final path = await ref.read(documentScanServiceProvider).captureFromCamera();
+    if (path == null) return;
+    await ref.read(haccpRepositoryProvider).upsertTemperaturePoint(point.copyWith(photoPath: path));
+    ref.invalidate(temperaturePointsProvider);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Foto aggiornata: ${point.name}')),
+      );
+    }
   }
 
   Future<void> _showReadingSheet(
@@ -163,6 +206,7 @@ class TemperaturesScreen extends ConsumerWidget {
     final opCtrl = TextEditingController(text: defaultOperator);
     final points = await ref.read(haccpRepositoryProvider).getTemperaturePoints();
     var selected = point;
+    String? proofPhoto;
 
     if (!context.mounted) return;
     await showModalBottomSheet<void>(
@@ -219,6 +263,15 @@ class TemperaturesScreen extends ConsumerWidget {
                     decoration: const InputDecoration(labelText: 'Nota / azione correttiva'),
                     maxLines: 2,
                   ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final path = await ref.read(documentScanServiceProvider).captureFromCamera();
+                      if (path != null) setLocal(() => proofPhoto = path);
+                    },
+                    icon: Icon(proofPhoto == null ? Icons.add_a_photo_outlined : Icons.check_circle_outline),
+                    label: Text(proofPhoto == null ? 'Foto prova termometro' : 'Foto allegata'),
+                  ),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: () async {
@@ -237,10 +290,12 @@ class TemperaturesScreen extends ConsumerWidget {
                             note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
                             minC: selected.minC,
                             maxC: selected.maxC,
+                            photoPath: proofPhoto,
                           );
                       ref.invalidate(dashboardProvider);
                       ref.invalidate(latestReadingsProvider);
                       ref.invalidate(temperaturePointsProvider);
+                      ref.invalidate(temperatureHistoryProvider);
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(

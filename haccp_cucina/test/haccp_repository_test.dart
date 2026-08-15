@@ -6,6 +6,7 @@ import 'package:haccp_cucina/data/models/ingredient_models.dart';
 import 'package:haccp_cucina/data/models/product_lot.dart';
 import 'package:haccp_cucina/data/repositories/haccp_repository.dart';
 import 'package:haccp_cucina/services/thermal_print_service.dart';
+import 'package:haccp_cucina/services/pdf_export_service.dart';
 import 'package:haccp_cucina/data/models/document_models.dart';
 
 void main() {
@@ -30,10 +31,11 @@ void main() {
       await db.close();
     });
 
-    test('seed crea punti temperatura e checklist', () async {
+    test('seed crea 5 frigo e 1 congelatore', () async {
       final points = await repo.getTemperaturePoints();
+      expect(points.where((p) => p.zone == 'frigo').length, 5);
+      expect(points.where((p) => p.zone == 'freezer').length, 1);
       final tasks = await repo.getCleaningTasks();
-      expect(points.length, greaterThanOrEqualTo(5));
       expect(tasks.length, greaterThanOrEqualTo(5));
     });
 
@@ -153,6 +155,28 @@ void main() {
       final items = blueEyesIngredientCatalog();
       expect(items.length, greaterThan(50));
       expect(items.every((i) => i.recommendedDays > 0), isTrue);
+    });
+  });
+group('PdfExportService', () {
+    test('genera PDF non vuoto', () async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      final db = AppDatabase.instance;
+      await db.close();
+      await db.useDatabase(await AppDatabase.openInMemory());
+      final repo = HaccpRepository(database: db);
+      final points = await repo.getTemperaturePoints();
+      final pdf = PdfExportService();
+      final bytes = await pdf.buildHaccpReport(
+        activityName: 'Blue Eyes',
+        operatorName: 'Test',
+        points: points,
+        readings: const [],
+        batches: const [],
+        lots: const [],
+      );
+      expect(bytes.length, greaterThan(100));
+      await db.close();
     });
   });
 }

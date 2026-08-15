@@ -44,6 +44,7 @@ class HaccpRepository {
     String? note,
     required double minC,
     required double maxC,
+    String? photoPath,
   }) async {
     final reading = TemperatureReading(
       id: _uuid.v4(),
@@ -53,11 +54,30 @@ class HaccpRepository {
       operatorName: operatorName,
       note: note,
       outOfRange: valueC < minC || valueC > maxC,
+      photoPath: photoPath,
     );
     final db = await _database;
     await db.insert('temperature_readings', reading.toMap());
     await AppDatabase.purgeOldTemperatureReadings(db);
     return reading;
+  }
+
+  Future<void> replaceTemperaturePoints(List<TemperaturePoint> points) async {
+    final db = await _database;
+    await db.delete('temperature_readings');
+    await db.delete('temperature_points');
+    for (final point in points) {
+      await db.insert('temperature_points', point.toMap());
+    }
+  }
+
+  Future<void> upsertCustomIngredient(IngredientCatalogItem item) async {
+    final db = await _database;
+    await db.insert(
+      'ingredient_catalog',
+      item.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<TemperatureReading>> getReadingsForPoint(

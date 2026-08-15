@@ -69,12 +69,14 @@ class AppSettings {
   final String defaultOperator;
   final String? printerAddress;
   final String? printerName;
+  final bool onboardingCompleted;
 
   const AppSettings({
     required this.activityName,
     required this.defaultOperator,
     this.printerAddress,
     this.printerName,
+    this.onboardingCompleted = false,
   });
 
   AppSettings copyWith({
@@ -82,12 +84,14 @@ class AppSettings {
     String? defaultOperator,
     String? printerAddress,
     String? printerName,
+    bool? onboardingCompleted,
   }) =>
       AppSettings(
         activityName: activityName ?? this.activityName,
         defaultOperator: defaultOperator ?? this.defaultOperator,
         printerAddress: printerAddress ?? this.printerAddress,
         printerName: printerName ?? this.printerName,
+        onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
       );
 
   Map<String, String?> toPrefs() => {
@@ -95,12 +99,14 @@ class AppSettings {
         'default_operator': defaultOperator,
         'printer_address': printerAddress,
         'printer_name': printerName,
+        'onboarding_completed': onboardingCompleted ? '1' : '0',
       };
 
   factory AppSettings.fromPrefs(Map<String, String?> prefs) => AppSettings(
-        activityName: prefs['activity_name'] ?? 'Pizzeria / Cucina',
+        activityName: prefs['activity_name'] ?? 'Blue Eyes Pizzeria',
         defaultOperator: prefs['default_operator'] ?? 'Operatore',
         printerAddress: prefs['printer_address'],
         printerName: prefs['printer_name'],
+        onboardingCompleted: prefs['onboarding_completed'] == '1',
       );
 }

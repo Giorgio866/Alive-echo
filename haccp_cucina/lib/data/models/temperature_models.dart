@@ -1,10 +1,11 @@
 class TemperaturePoint {
   final String id;
   final String name;
-  final String zone; // frigo, freezer, abbattitore, forno, banco caldo
+  final String zone; // frigo, freezer, abbattitore, forno, banco_caldo
   final double minC;
   final double maxC;
   final bool active;
+  final String? photoPath;
 
   const TemperaturePoint({
     required this.id,
@@ -13,6 +14,7 @@ class TemperaturePoint {
     required this.minC,
     required this.maxC,
     this.active = true,
+    this.photoPath,
   });
 
   Map<String, Object?> toMap() => {
@@ -22,6 +24,7 @@ class TemperaturePoint {
         'min_c': minC,
         'max_c': maxC,
         'active': active ? 1 : 0,
+        'photo_path': photoPath,
       };
 
   factory TemperaturePoint.fromMap(Map<String, Object?> map) => TemperaturePoint(
@@ -31,6 +34,7 @@ class TemperaturePoint {
         minC: (map['min_c']! as num).toDouble(),
         maxC: (map['max_c']! as num).toDouble(),
         active: (map['active'] as int? ?? 1) == 1,
+        photoPath: map['photo_path'] as String?,
       );
 
   TemperaturePoint copyWith({
@@ -39,6 +43,8 @@ class TemperaturePoint {
     double? minC,
     double? maxC,
     bool? active,
+    String? photoPath,
+    bool clearPhoto = false,
   }) =>
       TemperaturePoint(
         id: id,
@@ -47,6 +53,7 @@ class TemperaturePoint {
         minC: minC ?? this.minC,
         maxC: maxC ?? this.maxC,
         active: active ?? this.active,
+        photoPath: clearPhoto ? null : (photoPath ?? this.photoPath),
       );
 }
 
@@ -58,6 +65,7 @@ class TemperatureReading {
   final String operatorName;
   final String? note;
   final bool outOfRange;
+  final String? photoPath;
 
   const TemperatureReading({
     required this.id,
@@ -67,6 +75,7 @@ class TemperatureReading {
     required this.operatorName,
     this.note,
     required this.outOfRange,
+    this.photoPath,
   });
 
   Map<String, Object?> toMap() => {
@@ -77,6 +86,7 @@ class TemperatureReading {
         'operator_name': operatorName,
         'note': note,
         'out_of_range': outOfRange ? 1 : 0,
+        'photo_path': photoPath,
       };
 
   factory TemperatureReading.fromMap(Map<String, Object?> map) => TemperatureReading(
@@ -87,5 +97,6 @@ class TemperatureReading {
         operatorName: map['operator_name']! as String,
         note: map['note'] as String?,
         outOfRange: (map['out_of_range'] as int? ?? 0) == 1,
+        photoPath: map['photo_path'] as String?,
       );
 }

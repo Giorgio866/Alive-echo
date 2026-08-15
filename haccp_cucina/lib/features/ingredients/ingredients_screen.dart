@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../data/models/document_models.dart';
 import '../../data/models/ingredient_models.dart';
 import '../../providers/app_providers.dart';
 import '../../theme/app_theme.dart';
@@ -119,15 +120,97 @@ class _ActiveBatchesTab extends ConsumerWidget {
                   ),
                   Align(
                     alignment: Alignment.centerRight,
-                    child: IconButton(
-                      tooltip: 'Rimuovi',
-                      onPressed: () async {
-                        await ref.read(expiryNotificationServiceProvider).cancelBatch(b.id);
-                        await ref.read(haccpRepositoryProvider).deletePreparedBatch(b.id);
-                        ref.invalidate(preparedBatchesProvider);
-                        ref.invalidate(dashboardProvider);
-                      },
-                      icon: const Icon(Icons.delete_outline),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        FilledButton.tonalIcon(
+                          onPressed: () async {
+                            final settings = await ref.read(settingsServiceProvider).load();
+                            IngredientCatalogItem? item;
+                            final catalog = await ref.read(haccpRepositoryProvider).getIngredientCatalog();
+                            for (final c in catalog) {
+                              if (c.id == b.ingredientId) {
+                                item = c;
+                                break;
+                              }
+                            }
+                            final draft = LabelDraft(
+                              productName: b.ingredientName,
+                              lotCode: b.lotCode,
+                              preparedAt: b.preparedAt,
+                              useBy: b.expiresAt,
+                              allergens: item?.allergens,
+                              operatorName: b.operatorName,
+                              storageHint: item?.storageHint ?? 'In frigo 0–4 °C',
+                              copies: 1,
+                            );
+                            try {
+                              await ref.read(thermalPrintServiceProvider).printLabel(
+                                    draft,
+                                    activityName: settings.activityName,
+                                  );
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Etichetta inviata alla stampante')),
+                                );
+                              }
+                            } catch (e) {
+                              // Anteprima se stampante non connessa
+                              final preview = await ref.read(thermalPrintServiceProvider).previewText(
+                                    draft,
+                                    activityName: settings.activityName,
+                                  );
+                              if (context.mounted) {
+                                await showDialog<void>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Etichetta (anteprima)'),
+                                    content: SingleChildScrollView(
+                                      child: Text(preview, style: const TextStyle(fontFamily: 'monospace')),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx),
+                                        child: const Text('Chiudi'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () async {
+                                          Navigator.pop(ctx);
+                                          try {
+                                            await ref.read(thermalPrintServiceProvider).printLabel(
+                                                  draft,
+                                                  activityName: settings.activityName,
+                                                );
+                                          } catch (err) {
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text('$err')),
+                                              );
+                                            }
+                                          }
+                                        },
+                                        child: const Text('Riprova stampa'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.print, size: 18),
+                          label: const Text('Etichetta'),
+                        ),
+                        IconButton(
+                          tooltip: 'Rimuovi',
+                          onPressed: () async {
+                            await ref.read(expiryNotificationServiceProvider).cancelBatch(b.id);
+                            await ref.read(haccpRepositoryProvider).deletePreparedBatch(b.id);
+                            ref.invalidate(preparedBatchesProvider);
+                            ref.invalidate(dashboardProvider);
+                          },
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -220,6 +303,7 @@ class _CatalogTab extends ConsumerWidget {
 
   String _categoryLabel(String cat) {
     return switch (cat) {
+      'custom' => 'I tuoi preparati',
       'impasto' => 'Impasti',
       'salsa' => 'Salse e basi',
       'latticini' => 'Latticini',

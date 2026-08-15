@@ -7,7 +7,8 @@ class IngredientCatalogItem {
   final int recommendedDays;
   final String storageHint;
   final String? allergens;
-  final String source; // menu pizza / base / preparato
+  final String source; // menu pizza / base / preparato / custom
+  final String? photoPath;
 
   const IngredientCatalogItem({
     required this.id,
@@ -17,6 +18,7 @@ class IngredientCatalogItem {
     required this.storageHint,
     this.allergens,
     this.source = 'menu',
+    this.photoPath,
   });
 
   Map<String, Object?> toMap() => {
@@ -27,6 +29,7 @@ class IngredientCatalogItem {
         'storage_hint': storageHint,
         'allergens': allergens,
         'source': source,
+        'photo_path': photoPath,
       };
 
   factory IngredientCatalogItem.fromMap(Map<String, Object?> map) => IngredientCatalogItem(
@@ -37,6 +40,7 @@ class IngredientCatalogItem {
         storageHint: map['storage_hint']! as String,
         allergens: map['allergens'] as String?,
         source: map['source'] as String? ?? 'menu',
+        photoPath: map['photo_path'] as String?,
       );
 }
 

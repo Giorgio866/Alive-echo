@@ -13,7 +13,6 @@ Future<void> main() async {
   final container = ProviderContainer();
   await container.read(expiryNotificationServiceProvider).init();
 
-  // Allarmi immediati per preparati già in scadenza
   try {
     final repo = container.read(haccpRepositoryProvider);
     final expiring = await repo.getExpiringBatches(withinHours: 24);
@@ -21,9 +20,7 @@ Future<void> main() async {
     for (final batch in expiring) {
       await notifications.scheduleBatchExpiry(batch);
     }
-  } catch (_) {
-    // DB potrebbe non essere pronto su alcune piattaforme di test
-  }
+  } catch (_) {}
 
   runApp(
     UncontrolledProviderScope(
@@ -33,16 +30,17 @@ Future<void> main() async {
   );
 }
 
-class HaccpApp extends StatelessWidget {
+class HaccpApp extends ConsumerWidget {
   const HaccpApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
       title: 'HACCP Cucina',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
-      routerConfig: appRouter,
+      routerConfig: router,
     );
   }
 }

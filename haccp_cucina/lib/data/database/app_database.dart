@@ -10,7 +10,6 @@ class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
 
-  /// Conservazione minima letture temperatura (giorni).
   static const int temperatureRetentionDays = 30;
 
   Database? _db;
@@ -36,7 +35,7 @@ class AppDatabase {
     final path = p.join(databasesPath, 'haccp_cucina.db');
     final db = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);
@@ -46,13 +45,29 @@ class AppDatabase {
           await _createIngredientTables(db);
           await _seedIngredients(db);
         }
+        if (oldVersion < 3) {
+          await _migrateToV3(db);
+        }
       },
     );
     await purgeOldTemperatureReadings(db);
     return db;
   }
 
-  /// Elimina letture più vecchie di [temperatureRetentionDays].
+  static Future<void> _migrateToV3(Database db) async {
+    await _tryAddColumn(db, 'temperature_points', 'photo_path TEXT');
+    await _tryAddColumn(db, 'temperature_readings', 'photo_path TEXT');
+    await _tryAddColumn(db, 'ingredient_catalog', 'photo_path TEXT');
+  }
+
+  static Future<void> _tryAddColumn(Database db, String table, String columnDef) async {
+    try {
+      await db.execute('ALTER TABLE $table ADD COLUMN $columnDef');
+    } catch (_) {
+      // colonna già presente
+    }
+  }
+
   static Future<int> purgeOldTemperatureReadings(Database db) async {
     final cutoff = DateTime.now()
         .subtract(const Duration(days: temperatureRetentionDays))
@@ -72,7 +87,8 @@ class AppDatabase {
         zone TEXT NOT NULL,
         min_c REAL NOT NULL,
         max_c REAL NOT NULL,
-        active INTEGER NOT NULL DEFAULT 1
+        active INTEGER NOT NULL DEFAULT 1,
+        photo_path TEXT
       )
     ''');
     await db.execute('''
@@ -84,6 +100,7 @@ class AppDatabase {
         operator_name TEXT NOT NULL,
         note TEXT,
         out_of_range INTEGER NOT NULL DEFAULT 0,
+        photo_path TEXT,
         FOREIGN KEY(point_id) REFERENCES temperature_points(id)
       )
     ''');
@@ -152,7 +169,8 @@ class AppDatabase {
         recommended_days INTEGER NOT NULL,
         storage_hint TEXT NOT NULL,
         allergens TEXT,
-        source TEXT NOT NULL
+        source TEXT NOT NULL,
+        photo_path TEXT
       )
     ''');
     await db.execute('''
@@ -174,16 +192,18 @@ class AppDatabase {
     ''');
   }
 
+  /// 5 frigoriferi + 1 congelatore (layout tipico Blue Eyes / pizzeria).
+  static List<TemperaturePoint> defaultColdPoints() => [
+        TemperaturePoint(id: _uuid.v4(), name: 'Frigo 1', zone: 'frigo', minC: 0, maxC: 4),
+        TemperaturePoint(id: _uuid.v4(), name: 'Frigo 2', zone: 'frigo', minC: 0, maxC: 4),
+        TemperaturePoint(id: _uuid.v4(), name: 'Frigo 3', zone: 'frigo', minC: 0, maxC: 4),
+        TemperaturePoint(id: _uuid.v4(), name: 'Frigo 4', zone: 'frigo', minC: 0, maxC: 4),
+        TemperaturePoint(id: _uuid.v4(), name: 'Frigo 5', zone: 'frigo', minC: 0, maxC: 4),
+        TemperaturePoint(id: _uuid.v4(), name: 'Congelatore', zone: 'freezer', minC: -25, maxC: -18),
+      ];
+
   static Future<void> _seed(Database db) async {
-    final points = [
-      TemperaturePoint(id: _uuid.v4(), name: 'Frigo verdure', zone: 'frigo', minC: 0, maxC: 4),
-      TemperaturePoint(id: _uuid.v4(), name: 'Frigo latticini', zone: 'frigo', minC: 0, maxC: 4),
-      TemperaturePoint(id: _uuid.v4(), name: 'Congelatore surgelati', zone: 'freezer', minC: -25, maxC: -18),
-      TemperaturePoint(id: _uuid.v4(), name: 'Abbattitore', zone: 'abbattitore', minC: -40, maxC: 3),
-      TemperaturePoint(id: _uuid.v4(), name: 'Banco pizza caldo', zone: 'banco_caldo', minC: 60, maxC: 75),
-      TemperaturePoint(id: _uuid.v4(), name: 'Vetrina mozzarella', zone: 'frigo', minC: 0, maxC: 4),
-    ];
-    for (final point in points) {
+    for (final point in defaultColdPoints()) {
       await db.insert('temperature_points', point.toMap());
     }
 
@@ -197,14 +217,14 @@ class AppDatabase {
       ),
       CleaningTask(
         id: _uuid.v4(),
-        title: 'Pulizia forno a legna / elettrico',
+        title: 'Pulizia forno',
         area: 'pizzeria',
         frequency: 'daily',
-        instructions: 'Rimuovere cenere/residui a freddo, pulire piano e bocca forno.',
+        instructions: 'Rimuovere residui a freddo, pulire piano e bocca forno.',
       ),
       CleaningTask(
         id: _uuid.v4(),
-        title: 'Svuotamento e sanificazione frigoriferi',
+        title: 'Controllo e sanificazione frigoriferi',
         area: 'cucina',
         frequency: 'weekly',
         instructions: 'Controllare scadenze, pulire ripiani e guarnizioni.',
@@ -218,10 +238,10 @@ class AppDatabase {
       ),
       CleaningTask(
         id: _uuid.v4(),
-        title: 'Controllo trappole e pest control',
+        title: 'Controllo pest control',
         area: 'magazzino',
         frequency: 'weekly',
-        instructions: 'Verificare stato delle trappole e annotare anomalie.',
+        instructions: 'Verificare trappole e annotare anomalie.',
       ),
       CleaningTask(
         id: _uuid.v4(),
@@ -251,7 +271,7 @@ class AppDatabase {
   static Future<Database> openInMemory() async {
     final db = await openDatabase(
       inMemoryDatabasePath,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);

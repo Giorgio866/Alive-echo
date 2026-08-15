@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/cleaning/cleaning_screen.dart';
@@ -7,56 +8,80 @@ import '../features/home/home_screen.dart';
 import '../features/ingredients/ingredients_screen.dart';
 import '../features/labels/labels_screen.dart';
 import '../features/lots/lots_screen.dart';
+import '../features/onboarding/onboarding_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/temperatures/temperature_history_screen.dart';
 import '../features/temperatures/temperatures_screen.dart';
+import '../providers/app_providers.dart';
 import '../theme/app_theme.dart';
 
-final appRouter = GoRouter(
-  initialLocation: '/',
-  routes: [
-    StatefulShellRoute.indexedStack(
-      builder: (context, state, navigationShell) {
-        return AppShell(navigationShell: navigationShell);
-      },
-      branches: [
-        StatefulShellBranch(
-          routes: [
-            GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
-          ],
-        ),
-        StatefulShellBranch(
-          routes: [
-            GoRoute(path: '/temperature', builder: (context, state) => const TemperaturesScreen()),
-          ],
-        ),
-        StatefulShellBranch(
-          routes: [
-            GoRoute(path: '/cleaning', builder: (context, state) => const CleaningScreen()),
-          ],
-        ),
-        StatefulShellBranch(
-          routes: [
-            GoRoute(path: '/lots', builder: (context, state) => const LotsScreen()),
-          ],
-        ),
-        StatefulShellBranch(
-          routes: [
-            GoRoute(path: '/more', builder: (context, state) => const MoreHubScreen()),
-            GoRoute(path: '/documents', builder: (context, state) => const DocumentsScreen()),
-            GoRoute(path: '/labels', builder: (context, state) => const LabelsScreen()),
-            GoRoute(path: '/ingredients', builder: (context, state) => const IngredientsScreen()),
-            GoRoute(
-              path: '/temperature-history',
-              builder: (context, state) => const TemperatureHistoryScreen(),
-            ),
-            GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
-          ],
-        ),
-      ],
-    ),
-  ],
-);
+final appRouterProvider = Provider<GoRouter>((ref) {
+  final refresh = _SettingsRefresh(ref);
+  ref.onDispose(refresh.dispose);
+
+  return GoRouter(
+    initialLocation: '/',
+    refreshListenable: refresh,
+    redirect: (context, state) {
+      final goingOnboarding = state.matchedLocation == '/onboarding';
+      final settings = ref.read(settingsProvider).value;
+      if (settings == null) return null;
+      if (!settings.onboardingCompleted && !goingOnboarding) return '/onboarding';
+      if (settings.onboardingCompleted && goingOnboarding) return '/';
+      return null;
+    },
+    routes: [
+      GoRoute(path: '/onboarding', builder: (context, state) => const OnboardingScreen()),
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) {
+          return AppShell(navigationShell: navigationShell);
+        },
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/temperature', builder: (context, state) => const TemperaturesScreen()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/cleaning', builder: (context, state) => const CleaningScreen()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/lots', builder: (context, state) => const LotsScreen()),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(path: '/more', builder: (context, state) => const MoreHubScreen()),
+              GoRoute(path: '/documents', builder: (context, state) => const DocumentsScreen()),
+              GoRoute(path: '/labels', builder: (context, state) => const LabelsScreen()),
+              GoRoute(path: '/ingredients', builder: (context, state) => const IngredientsScreen()),
+              GoRoute(
+                path: '/temperature-history',
+                builder: (context, state) => const TemperatureHistoryScreen(),
+              ),
+              GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
+            ],
+          ),
+        ],
+      ),
+    ],
+  );
+});
+
+class _SettingsRefresh extends ChangeNotifier {
+  _SettingsRefresh(this.ref) {
+    ref.listen(settingsProvider, (_, __) => notifyListeners());
+  }
+  final Ref ref;
+}
 
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.navigationShell});
@@ -102,11 +127,11 @@ class AppShell extends StatelessWidget {
   }
 }
 
-class MoreHubScreen extends StatelessWidget {
+class MoreHubScreen extends ConsumerWidget {
   const MoreHubScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(title: const Text('Strumenti')),
       body: ListView(
@@ -115,8 +140,28 @@ class MoreHubScreen extends StatelessWidget {
           _HubTile(
             icon: Icons.restaurant_menu,
             title: 'Preparati Blue Eyes',
-            subtitle: 'Ingredienti menu + scadenze automatiche',
+            subtitle: 'Ingredienti + etichetta in un tap',
             onTap: () => context.push('/ingredients'),
+          ),
+          const SizedBox(height: 10),
+          _HubTile(
+            icon: Icons.picture_as_pdf_outlined,
+            title: 'Esporta PDF registro',
+            subtitle: 'Temperature 30 gg, preparati e lotti',
+            onTap: () async {
+              final s = await ref.read(settingsServiceProvider).load();
+              try {
+                await ref.read(pdfExportServiceProvider).exportFromRepository(
+                      repo: ref.read(haccpRepositoryProvider),
+                      activityName: s.activityName,
+                      operatorName: s.defaultOperator,
+                    );
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+                }
+              }
+            },
           ),
           const SizedBox(height: 10),
           _HubTile(
@@ -145,6 +190,20 @@ class MoreHubScreen extends StatelessWidget {
             title: 'Impostazioni',
             subtitle: 'Locale, operatore, stampante',
             onTap: () => context.push('/settings'),
+          ),
+          const SizedBox(height: 10),
+          _HubTile(
+            icon: Icons.tour_outlined,
+            title: 'Rifai setup guidato',
+            subtitle: 'Rinomina frigo e aggiungi ingredienti',
+            onTap: () async {
+              final current = await ref.read(settingsServiceProvider).load();
+              await ref.read(settingsServiceProvider).save(
+                    current.copyWith(onboardingCompleted: false),
+                  );
+              ref.invalidate(settingsProvider);
+              if (context.mounted) context.go('/onboarding');
+            },
           ),
         ],
       ),
