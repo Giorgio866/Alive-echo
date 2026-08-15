@@ -35,7 +35,7 @@ class _IngredientsScreenState extends ConsumerState<IngredientsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Preparati Blue Eyes'),
+        title: const Text('Preparati e catalogo'),
         bottom: TabBar(
           controller: _tabs,
           tabs: const [
@@ -73,7 +73,7 @@ class _ActiveBatchesTab extends ConsumerWidget {
           return EmptyState(
             icon: Icons.restaurant_menu,
             title: 'Nessun preparato attivo',
-            message: 'Registra un ingrediente dal catalogo Blue Eyes: la scadenza sarà calcolata automaticamente.',
+            message: 'Carica i tuoi ingredienti (foto + giorni di scadenza) e registra quando li prepari.',
             cta: FilledButton(onPressed: onRegister, child: const Text('Apri catalogo')),
           );
         }

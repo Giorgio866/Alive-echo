@@ -10,6 +10,7 @@ import '../services/document_scan_service.dart';
 import '../services/expiry_notification_service.dart';
 import '../services/pdf_export_service.dart';
 import '../services/settings_service.dart';
+import '../services/temperature_ocr_service.dart';
 import '../services/thermal_print_service.dart';
 
 final haccpRepositoryProvider = Provider<HaccpRepository>((ref) {
@@ -30,6 +31,12 @@ final settingsServiceProvider = Provider<SettingsService>((ref) {
 
 final expiryNotificationServiceProvider = Provider<ExpiryNotificationService>((ref) {
   return ExpiryNotificationService();
+});
+
+final temperatureOcrServiceProvider = Provider<TemperatureOcrService>((ref) {
+  final service = TemperatureOcrService();
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 final pdfExportServiceProvider = Provider<PdfExportService>((ref) {

@@ -50,19 +50,43 @@ class TemperaturesScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final points = pointsAsync.value ?? [];
-          if (points.isEmpty) return;
-          await _showReadingSheet(
-            context,
-            ref,
-            points.first,
-            settings.value?.defaultOperator ?? 'Operatore',
-          );
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Nuova lettura'),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'temp_photo',
+            onPressed: () async {
+              final points = pointsAsync.value ?? [];
+              if (points.isEmpty) return;
+              await _showReadingSheet(
+                context,
+                ref,
+                points.first,
+                settings.value?.defaultOperator ?? 'Operatore',
+                startWithPhoto: true,
+              );
+            },
+            icon: const Icon(Icons.photo_camera),
+            label: const Text('Foto temperatura'),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            heroTag: 'temp_manual',
+            onPressed: () async {
+              final points = pointsAsync.value ?? [];
+              if (points.isEmpty) return;
+              await _showReadingSheet(
+                context,
+                ref,
+                points.first,
+                settings.value?.defaultOperator ?? 'Operatore',
+              );
+            },
+            icon: const Icon(Icons.add),
+            label: const Text('Manuale'),
+          ),
+        ],
       ),
       body: pointsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -199,14 +223,44 @@ class TemperaturesScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     TemperaturePoint point,
-    String defaultOperator,
-  ) async {
+    String defaultOperator, {
+    bool startWithPhoto = false,
+  }) async {
     final valueCtrl = TextEditingController();
     final noteCtrl = TextEditingController();
     final opCtrl = TextEditingController(text: defaultOperator);
     final points = await ref.read(haccpRepositoryProvider).getTemperaturePoints();
     var selected = point;
     String? proofPhoto;
+    var ocrBusy = false;
+    String? ocrHint;
+    List<double> candidates = [];
+
+    Future<void> runOcr(void Function(void Function()) setLocal) async {
+      setLocal(() => ocrBusy = true);
+      try {
+        final path = await ref.read(documentScanServiceProvider).captureFromCamera();
+        if (path == null) {
+          setLocal(() => ocrBusy = false);
+          return;
+        }
+        proofPhoto = path;
+        final result = await ref.read(temperatureOcrServiceProvider).readFromFile(path);
+        candidates = result.candidates;
+        if (result.valueC != null) {
+          valueCtrl.text = result.valueC!.toStringAsFixed(
+            result.valueC! == result.valueC!.roundToDouble() ? 0 : 1,
+          );
+          ocrHint = 'Letto dalla foto: ${result.valueC!.toStringAsFixed(1)} °C (controlla e conferma)';
+        } else {
+          ocrHint = 'Foto salvata. Non ho letto un numero chiaro: inserisci °C a mano.';
+        }
+      } catch (e) {
+        ocrHint = 'Foto salvata. OCR non disponibile: inserisci °C a mano.';
+      } finally {
+        setLocal(() => ocrBusy = false);
+      }
+    }
 
     if (!context.mounted) return;
     await showModalBottomSheet<void>(
@@ -216,6 +270,12 @@ class TemperaturesScreen extends ConsumerWidget {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setLocal) {
+            if (startWithPhoto && proofPhoto == null && !ocrBusy && ocrHint == null) {
+              // Avvia OCR al primo frame
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (proofPhoto == null && !ocrBusy) runOcr(setLocal);
+              });
+            }
             return Padding(
               padding: EdgeInsets.only(
                 left: 20,
@@ -223,96 +283,134 @@ class TemperaturesScreen extends ConsumerWidget {
                 top: 8,
                 bottom: MediaQuery.viewInsetsOf(ctx).bottom + 20,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Registra temperatura', style: Theme.of(ctx).textTheme.headlineSmall),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<TemperaturePoint>(
-                    value: selected,
-                    items: points
-                        .map((p) => DropdownMenuItem(value: p, child: Text(p.name)))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setLocal(() => selected = v);
-                    },
-                    decoration: const InputDecoration(labelText: 'Punto di misura'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: valueCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[-0-9.,]')),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: 'Valore °C',
-                      helperText:
-                          'Range ammesso: ${selected.minC.toStringAsFixed(0)} – ${selected.maxC.toStringAsFixed(0)} °C',
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Registra temperatura', style: Theme.of(ctx).textTheme.headlineSmall),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Scatta il display del termometro: l\'app legge i °C e salva la foto come prova.',
+                      style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: opCtrl,
-                    decoration: const InputDecoration(labelText: 'Operatore'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: noteCtrl,
-                    decoration: const InputDecoration(labelText: 'Nota / azione correttiva'),
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      final path = await ref.read(documentScanServiceProvider).captureFromCamera();
-                      if (path != null) setLocal(() => proofPhoto = path);
-                    },
-                    icon: Icon(proofPhoto == null ? Icons.add_a_photo_outlined : Icons.check_circle_outline),
-                    label: Text(proofPhoto == null ? 'Foto prova termometro' : 'Foto allegata'),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () async {
-                      final raw = valueCtrl.text.trim().replaceAll(',', '.');
-                      final value = double.tryParse(raw);
-                      if (value == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Inserisci una temperatura valida')),
-                        );
-                        return;
-                      }
-                      final reading = await ref.read(haccpRepositoryProvider).addTemperatureReading(
-                            pointId: selected.id,
-                            valueC: value,
-                            operatorName: opCtrl.text.trim().isEmpty ? 'Operatore' : opCtrl.text.trim(),
-                            note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
-                            minC: selected.minC,
-                            maxC: selected.maxC,
-                            photoPath: proofPhoto,
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<TemperaturePoint>(
+                      value: selected,
+                      items: points
+                          .map((p) => DropdownMenuItem(value: p, child: Text(p.name)))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) setLocal(() => selected = v);
+                      },
+                      decoration: const InputDecoration(labelText: 'Frigo / congelatore'),
+                    ),
+                    const SizedBox(height: 12),
+                    if (proofPhoto != null && !kIsWeb && File(proofPhoto!).existsSync())
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(File(proofPhoto!), height: 140, fit: BoxFit.cover),
+                      ),
+                    if (ocrBusy) ...[
+                      const SizedBox(height: 12),
+                      const Center(child: CircularProgressIndicator()),
+                      const SizedBox(height: 8),
+                      const Text('Sto leggendo i °C dalla foto…', textAlign: TextAlign.center),
+                    ],
+                    if (ocrHint != null) ...[
+                      const SizedBox(height: 8),
+                      Text(ocrHint!, style: Theme.of(ctx).textTheme.bodySmall),
+                    ],
+                    if (candidates.length > 1) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: candidates.take(5).map((c) {
+                          return ActionChip(
+                            label: Text('${c.toStringAsFixed(1)} °C'),
+                            onPressed: () {
+                              valueCtrl.text = c.toStringAsFixed(c == c.roundToDouble() ? 0 : 1);
+                              setLocal(() {});
+                            },
                           );
-                      ref.invalidate(dashboardProvider);
-                      ref.invalidate(latestReadingsProvider);
-                      ref.invalidate(temperaturePointsProvider);
-                      ref.invalidate(temperatureHistoryProvider);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              reading.outOfRange
-                                  ? 'Registrato FUORI RANGE: ${value.toStringAsFixed(1)} °C'
-                                  : 'Temperatura registrata: ${value.toStringAsFixed(1)} °C',
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: valueCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[-0-9.,]')),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: 'Valore °C',
+                        helperText:
+                            'Range: ${selected.minC.toStringAsFixed(0)} – ${selected.maxC.toStringAsFixed(0)} °C',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: opCtrl,
+                      decoration: const InputDecoration(labelText: 'Operatore'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteCtrl,
+                      decoration: const InputDecoration(labelText: 'Nota / azione correttiva'),
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: ocrBusy ? null : () => runOcr(setLocal),
+                      icon: Icon(proofPhoto == null ? Icons.photo_camera : Icons.cameraswitch),
+                      label: Text(proofPhoto == null ? 'Scatta foto termometro' : 'Scatta di nuovo'),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () async {
+                        final raw = valueCtrl.text.trim().replaceAll(',', '.');
+                        final value = double.tryParse(raw);
+                        if (value == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Inserisci o scatta una temperatura valida')),
+                          );
+                          return;
+                        }
+                        final reading = await ref.read(haccpRepositoryProvider).addTemperatureReading(
+                              pointId: selected.id,
+                              valueC: value,
+                              operatorName:
+                                  opCtrl.text.trim().isEmpty ? 'Operatore' : opCtrl.text.trim(),
+                              note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+                              minC: selected.minC,
+                              maxC: selected.maxC,
+                              photoPath: proofPhoto,
+                            );
+                        ref.invalidate(dashboardProvider);
+                        ref.invalidate(latestReadingsProvider);
+                        ref.invalidate(temperaturePointsProvider);
+                        ref.invalidate(temperatureHistoryProvider);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                reading.outOfRange
+                                    ? 'FUORI RANGE ${value.toStringAsFixed(1)} °C'
+                                        '${proofPhoto != null ? ' · foto salvata' : ''}'
+                                    : 'Salvato ${value.toStringAsFixed(1)} °C'
+                                        '${proofPhoto != null ? ' · foto salvata' : ''}',
+                              ),
+                              backgroundColor: reading.outOfRange ? AppColors.coral : AppColors.ok,
                             ),
-                            backgroundColor: reading.outOfRange ? AppColors.coral : AppColors.ok,
-                          ),
-                        );
-                      }
-                    },
-                    child: const Text('Salva lettura'),
-                  ),
-                ],
+                          );
+                        }
+                      },
+                      child: const Text('Salva lettura'),
+                    ),
+                  ],
+                ),
               ),
             );
           },

@@ -20,7 +20,7 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _pageCtrl = PageController();
-  final _activityCtrl = TextEditingController(text: 'Blue Eyes Pizzeria');
+  final _activityCtrl = TextEditingController(text: 'La mia pizzeria');
   final _operatorCtrl = TextEditingController();
   late List<_FridgeDraft> _fridges;
   final List<_CustomIngredientDraft> _customIngredients = [];
@@ -63,7 +63,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   Future<void> _finish() async {
     setState(() => _saving = true);
     try {
-      final activity = _activityCtrl.text.trim().isEmpty ? 'Blue Eyes Pizzeria' : _activityCtrl.text.trim();
+      final activity = _activityCtrl.text.trim().isEmpty ? 'La mia pizzeria' : _activityCtrl.text.trim();
       final operator = _operatorCtrl.text.trim().isEmpty ? 'Operatore' : _operatorCtrl.text.trim();
 
       final points = _fridges
@@ -80,6 +80,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           .toList();
 
       await ref.read(haccpRepositoryProvider).replaceTemperaturePoints(points);
+      // Catalogo: solo ciò che l'utente ha caricato ora
+      await ref.read(haccpRepositoryProvider).clearIngredientCatalog();
 
       for (final c in _customIngredients) {
         final name = c.nameCtrl.text.trim();
@@ -91,7 +93,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 name: name,
                 category: 'custom',
                 recommendedDays: days.clamp(1, 60),
-                storageHint: 'In frigo 0–4 °C',
+                storageHint: 'In frigo 0-4 °C',
                 source: 'custom_photo',
                 photoPath: c.photoPath,
               ),
@@ -296,14 +298,27 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Text('Ingredienti extra', style: Theme.of(context).textTheme.headlineSmall),
+        Text('Il tuo catalogo ingredienti', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 6),
         Text(
-          'Il menu Blue Eyes è già caricato. Qui puoi aggiungere altri preparati scattando una foto '
-          '(opzionale, puoi anche saltare).',
+          'Nessun catalogo predefinito: carica i preparati della TUA cucina. '
+          'Scatta una foto a ogni prodotto e imposta i giorni di scadenza.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.slateMuted),
         ),
         const SizedBox(height: 16),
+        if (_customIngredients.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: AppColors.amberSoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'Suggerimento: fotografa mozzarella, salse, salumi, impasti gia aperti '
+              'e indica dopo quanti giorni scadono in frigo.',
+            ),
+          ),
         ..._customIngredients.asMap().entries.map((e) {
           final c = e.value;
           return Padding(
@@ -318,17 +333,23 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 64,
-                      height: 64,
-                      child: c.photoPath != null && !kIsWeb && File(c.photoPath!).existsSync()
-                          ? Image.file(File(c.photoPath!), fit: BoxFit.cover)
-                          : const ColoredBox(
-                              color: AppColors.tealSoft,
-                              child: Icon(Icons.restaurant, color: AppColors.tealDark),
-                            ),
+                  GestureDetector(
+                    onTap: () async {
+                      final path = await _capturePhoto();
+                      if (path != null) setState(() => c.photoPath = path);
+                    },
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        width: 64,
+                        height: 64,
+                        child: c.photoPath != null && !kIsWeb && File(c.photoPath!).existsSync()
+                            ? Image.file(File(c.photoPath!), fit: BoxFit.cover)
+                            : const ColoredBox(
+                                color: AppColors.tealSoft,
+                                child: Icon(Icons.add_a_photo_outlined, color: AppColors.tealDark),
+                              ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -337,13 +358,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       children: [
                         TextField(
                           controller: c.nameCtrl,
-                          decoration: const InputDecoration(labelText: 'Nome preparato'),
+                          decoration: const InputDecoration(labelText: 'Nome preparato / ingrediente'),
                         ),
                         const SizedBox(height: 8),
                         TextField(
                           controller: c.daysCtrl,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Giorni di scadenza'),
+                          decoration: const InputDecoration(
+                            labelText: 'Giorni di scadenza (dopo prep./apertura)',
+                          ),
                         ),
                       ],
                     ),
@@ -363,7 +386,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             ),
           );
         }),
-        OutlinedButton.icon(
+        FilledButton.icon(
           onPressed: () async {
             final path = await _capturePhoto();
             setState(() {
@@ -373,21 +396,52 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             });
           },
           icon: const Icon(Icons.add_a_photo_outlined),
-          label: const Text('Aggiungi da foto'),
+          label: const Text('Aggiungi ingrediente da foto'),
         ),
-        TextButton(
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
           onPressed: () {
             setState(() {
               _customIngredients.add(_CustomIngredientDraft()..daysCtrl.text = '3');
             });
           },
-          child: const Text('Aggiungi senza foto'),
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Aggiungi solo con nome'),
+        ),
+        TextButton(
+          onPressed: () async {
+            // Opzionale: solo se l'utente lo chiede esplicitamente
+            final ok = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Catalogo di esempio?'),
+                content: const Text(
+                  'Puoi importare un catalogo di esempio (menu pizzeria) e poi modificarlo. '
+                  'Non e obbligatorio: meglio caricare i tuoi prodotti.',
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+                  FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Importa esempio')),
+                ],
+              ),
+            );
+            if (ok == true) {
+              await ref.read(haccpRepositoryProvider).importOptionalBlueEyesCatalog();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Esempio importato: potrai modificarlo dopo')),
+                );
+              }
+            }
+          },
+          child: const Text('Hai fretta? Importa catalogo di esempio'),
         ),
       ],
     );
   }
 
   Widget _donePage() {
+    final n = _customIngredients.where((c) => c.nameCtrl.text.trim().isNotEmpty).length;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -395,9 +449,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         const SizedBox(height: 8),
         Text(
           '• ${_fridges.length} punti temperatura (5 frigo + congelatore)\n'
-          '• Catalogo Blue Eyes già disponibile\n'
-          '• ${_customIngredients.where((c) => c.nameCtrl.text.trim().isNotEmpty).length} ingredienti personalizzati\n'
-          '• Notifiche scadenza e export PDF dal menu Altro',
+          '• $n ingredienti nel TUO catalogo\n'
+          '• Temperature anche da foto del termometro\n'
+          '• Notifiche scadenza e export PDF',
           style: Theme.of(context).textTheme.bodyLarge,
         ),
         const SizedBox(height: 16),
@@ -408,7 +462,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             borderRadius: BorderRadius.circular(14),
           ),
           child: const Text(
-            'Potrai sempre aggiornare foto frigo, preparati e stampante dalle Impostazioni e dalle schermate Temperature / Preparati.',
+            'Potrai aggiungere altri ingredienti e aggiornare foto frigo in qualsiasi momento.',
           ),
         ),
       ],

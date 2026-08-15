@@ -39,25 +39,22 @@ void main() {
       expect(tasks.length, greaterThanOrEqualTo(5));
     });
 
-    test('catalogo Blue Eyes precaricato con scadenze', () async {
+    test('catalogo vuoto di default (caricato dall\'utente)', () async {
       final catalog = await repo.getIngredientCatalog();
-      expect(catalog.length, greaterThanOrEqualTo(40));
-      final mozzarella = catalog.firstWhere((c) => c.id == 'mozzarella');
-      expect(mozzarella.recommendedDays, 2);
-      expect(catalog.any((c) => c.name.toLowerCase().contains('pomodoro')), isTrue);
-      expect(catalog.any((c) => c.name.toLowerCase().contains('speck')), isTrue);
-    });
-
-    test('preparato calcola scadenza consigliata', () async {
-      final catalog = await repo.getIngredientCatalog();
-      final item = catalog.firstWhere((c) => c.id == 'bufala');
-      final batch = await repo.registerPreparedBatch(
-        ingredient: item,
-        operatorName: 'Marco',
-        preparedAt: DateTime(2026, 8, 14, 10),
+      expect(catalog, isEmpty);
+      await repo.upsertCustomIngredient(
+        const IngredientCatalogItem(
+          id: 'custom-1',
+          name: 'Mozzarella casa',
+          category: 'custom',
+          recommendedDays: 2,
+          storageHint: 'In frigo',
+          source: 'custom_photo',
+        ),
       );
-      expect(batch.ingredientName, contains('bufala'));
-      expect(batch.expiresAt.difference(DateTime(2026, 8, 14)).inDays, item.recommendedDays);
+      final after = await repo.getIngredientCatalog();
+      expect(after.length, 1);
+      expect(after.first.name, 'Mozzarella casa');
     });
 
     test('storico temperature conserva fino a 30 giorni', () async {
@@ -108,7 +105,7 @@ void main() {
     test('dashboard snapshot aggrega alert', () async {
       final snap = await repo.getDashboardSnapshot();
       expect(snap.temperaturePoints, greaterThan(0));
-      expect(snap.ingredientCatalogCount, greaterThan(0));
+      expect(snap.ingredientCatalogCount, 0);
     });
   });
 

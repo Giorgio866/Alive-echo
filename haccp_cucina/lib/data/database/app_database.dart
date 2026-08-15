@@ -35,7 +35,7 @@ class AppDatabase {
     final path = p.join(databasesPath, 'haccp_cucina.db');
     final db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);
@@ -43,10 +43,13 @@ class AppDatabase {
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createIngredientTables(db);
-          await _seedIngredients(db);
         }
         if (oldVersion < 3) {
           await _migrateToV3(db);
+        }
+        if (oldVersion < 4) {
+          // Rimuove catalogo Blue Eyes predefinito: ogni locale carica il proprio.
+          await clearMenuCatalog(db);
         }
       },
     );
@@ -254,11 +257,11 @@ class AppDatabase {
     for (final task in tasks) {
       await db.insert('cleaning_tasks', task.toMap());
     }
-
-    await _seedIngredients(db);
+    // Catalogo ingredienti: vuoto al primo avvio — lo carica l'utente nel setup.
   }
 
-  static Future<void> _seedIngredients(Database db) async {
+  /// Import opzionale (non usato al seed).
+  static Future<void> importBlueEyesCatalog(Database db) async {
     for (final item in blueEyesIngredientCatalog()) {
       await db.insert(
         'ingredient_catalog',
@@ -268,10 +271,18 @@ class AppDatabase {
     }
   }
 
+  static Future<void> clearMenuCatalog(Database db) async {
+    await db.delete(
+      'ingredient_catalog',
+      where: "source = ?",
+      whereArgs: ['blue_eyes_menu'],
+    );
+  }
+
   static Future<Database> openInMemory() async {
     final db = await openDatabase(
       inMemoryDatabasePath,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);

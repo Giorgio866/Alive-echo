@@ -80,6 +80,17 @@ class HaccpRepository {
     );
   }
 
+  Future<void> clearIngredientCatalog() async {
+    final db = await _database;
+    await db.delete('ingredient_catalog');
+  }
+
+  Future<int> importOptionalBlueEyesCatalog() async {
+    final db = await _database;
+    await AppDatabase.importBlueEyesCatalog(db);
+    return (await getIngredientCatalog()).length;
+  }
+
   Future<List<TemperatureReading>> getReadingsForPoint(
     String pointId, {
     int? limit,

@@ -139,8 +139,8 @@ class MoreHubScreen extends ConsumerWidget {
         children: [
           _HubTile(
             icon: Icons.restaurant_menu,
-            title: 'Preparati Blue Eyes',
-            subtitle: 'Ingredienti + etichetta in un tap',
+            title: 'Preparati / catalogo',
+            subtitle: 'I tuoi ingredienti + etichetta in un tap',
             onTap: () => context.push('/ingredients'),
           ),
           const SizedBox(height: 10),
