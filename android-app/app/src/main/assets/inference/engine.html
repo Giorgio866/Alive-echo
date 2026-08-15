@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeCompanion Inference</title>
+  <style>
+    html, body { margin: 0; padding: 8px; background: #0f1419; color: #c9d1d9; font-family: sans-serif; font-size: 12px; }
+    #status { font-weight: 600; margin-bottom: 8px; }
+    #log { white-space: pre-wrap; opacity: 0.65; max-height: 120px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div id="status">Motore AI in avvio…</div>
+  <div id="log"></div>
+  <script type="module">
+    import { Wllama } from "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.1/esm/index.js";
+
+    const CONFIG_PATHS = {
+      "single-thread/wllama.wasm": "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.1/esm/single-thread/wllama.wasm",
+      "multi-thread/wllama.wasm": "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.1/esm/multi-thread/wllama.wasm",
+    };
+
+    const statusEl = document.getElementById("status");
+    const logEl = document.getElementById("log");
+    let wllama = null;
+    let engineReady = false;
+    let loadedModel = null;
+
+    function bridge(fn, ...args) {
+      try {
+        if (window.AndroidBridge && typeof window.AndroidBridge[fn] === "function") {
+          window.AndroidBridge[fn](...args.map(String));
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+      bridge("onStatus", msg);
+    }
+
+    function log(msg) {
+      logEl.textContent += msg + "\n";
+      bridge("onLog", msg);
+    }
+
+    async function init() {
+      try {
+        wllama = new Wllama(CONFIG_PATHS);
+        engineReady = true;
+        setStatus("Motore pronto. Scegli un modello.");
+        bridge("onEngineReady");
+      } catch (e) {
+        setStatus("Errore motore: " + e);
+        bridge("onError", String(e));
+      }
+    }
+
+    async function downloadBlob(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Download HTTP " + res.status + " " + url);
+      const total = Number(res.headers.get("content-length") || 0);
+      if (!res.body || !res.body.getReader) {
+        const buf = await res.arrayBuffer();
+        return new Blob([buf]);
+      }
+      const reader = res.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.byteLength;
+        if (total > 0) {
+          setStatus("Download modello: " + Math.round((loaded / total) * 100) + "%");
+        } else {
+          setStatus("Download modello: " + Math.round(loaded / (1024 * 1024)) + " MB");
+        }
+      }
+      return new Blob(chunks);
+    }
+
+    window.loadModel = async function (repo, file, localUrl) {
+      if (!wllama) throw new Error("Motore non pronto");
+      const hfUrl = "https://huggingface.co/" + repo + "/resolve/main/" + file;
+      const preferred = (localUrl && String(localUrl).trim()) ? String(localUrl).trim() : hfUrl;
+      setStatus("Carico modello…");
+      log("URL: " + preferred);
+      let blob;
+      try {
+        blob = await downloadBlob(preferred);
+      } catch (e) {
+        if (preferred !== hfUrl) {
+          setStatus("File locale non letto, scarico da Hugging Face…");
+          blob = await downloadBlob(hfUrl);
+        } else {
+          throw e;
+        }
+      }
+      if (!blob || blob.size < 1024) {
+        throw new Error("File modello vuoto o troppo piccolo");
+      }
+      setStatus("Caricamento in memoria (" + Math.round(blob.size / (1024 * 1024)) + " MB)…");
+      await wllama.loadModel([blob], {
+        n_ctx: 1024,
+        n_threads: Math.max(2, Math.min(4, navigator.hardwareConcurrency || 2)),
+      });
+      loadedModel = repo + "/" + file;
+      setStatus("Modello caricato");
+      bridge("onModelLoaded", loadedModel);
+      return loadedModel;
+    };
+
+    window.chat = async function (prompt, maxTokens) {
+      if (!wllama || !loadedModel) throw new Error("Nessun modello caricato");
+      setStatus("Generazione…");
+      const limit = Math.max(16, Math.min(Number(maxTokens) || 80, 256));
+      const stopRe = /CODICE APERTO:|STATO COMPILAZIONE:|RICHIESTA:|<\|im_end\|>|<\|im_start\|>/;
+      const text = await wllama.createCompletion(String(prompt), {
+        nPredict: limit,
+        sampling: { temp: 0.7, top_k: 30, top_p: 0.9, penalty_repeat: 1.12 },
+        onNewToken: (_token, _piece, currentText, optionals) => {
+          let shown = String(currentText || "");
+          const cut = shown.search(stopRe);
+          if (cut >= 0) {
+            shown = shown.slice(0, cut);
+            try {
+              if (optionals && typeof optionals.abort === "function") optionals.abort();
+            } catch (_) {}
+          }
+          bridge("onToken", shown.trim());
+        },
+      });
+      let out = String(text || "");
+      const cut = out.search(stopRe);
+      if (cut >= 0) out = out.slice(0, cut);
+      out = out.replace(/<\|im_end\|>/g, "").trim();
+      setStatus("Pronto");
+      bridge("onComplete", out);
+      return out;
+    };
+
+    window.getState = function () {
+      return JSON.stringify({ engineReady, loadedModel });
+    };
+
+    init();
+  </script>
+</body>
+</html>
