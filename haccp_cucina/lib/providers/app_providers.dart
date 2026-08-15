@@ -15,6 +15,8 @@ import '../services/pdf_export_service.dart';
 import '../services/settings_service.dart';
 import '../services/temperature_ocr_service.dart';
 import '../services/thermal_print_service.dart';
+import '../services/vision_label_service.dart';
+import '../services/vision_model_service.dart';
 
 final haccpRepositoryProvider = Provider<HaccpRepository>((ref) {
   return HaccpRepository();
@@ -52,6 +54,22 @@ final lotLabelOcrServiceProvider = Provider<LotLabelOcrService>((ref) {
   final service = LotLabelOcrService();
   ref.onDispose(service.dispose);
   return service;
+});
+
+final visionModelServiceProvider = Provider<VisionModelService>((ref) {
+  final service = VisionModelService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+final visionLabelServiceProvider = Provider<VisionLabelService>((ref) {
+  final service = VisionLabelService(models: ref.watch(visionModelServiceProvider));
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+final visionModelReadyProvider = FutureProvider<bool>((ref) async {
+  return ref.watch(visionModelServiceProvider).isReady();
 });
 
 final pdfExportServiceProvider = Provider<PdfExportService>((ref) {

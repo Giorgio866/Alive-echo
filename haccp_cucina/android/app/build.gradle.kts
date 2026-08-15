@@ -26,6 +26,11 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
+        ndk {
+            // Solo arm64: riduce peso APK (llama.cpp vision on-device)
+            abiFilters.clear()
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -37,6 +42,13 @@ android {
             )
         }
     }
+
+    packaging {
+        jniLibs {
+            // Necessario perché llama_cpp_dart apre le .so via DynamicLibrary.open
+            useLegacyPackaging = true
+        }
+    }
 }
 
 flutter {
@@ -45,4 +57,6 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // llama.cpp + mtmd (visione SmolVLM) — arm64-v8a da release netdur/llama_cpp_dart
+    implementation(files("libs/llama-cpp-dart.aar"))
 }

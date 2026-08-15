@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/document_models.dart';
 import '../../providers/app_providers.dart';
 import '../../services/thermal_print_service.dart';
+import '../../services/vision_model_service.dart';
 import '../../theme/app_theme.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -23,6 +24,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<ThermalPrinterDevice> _devices = [];
   bool _loadingDevices = false;
   bool _testingNetwork = false;
+  bool _visionDownloading = false;
+  VisionDownloadProgress? _visionProgress;
   String? _printerSummary;
   String _mode = 'network'; // bluetooth | network
 
@@ -361,6 +364,75 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ],
           const SizedBox(height: 28),
+          Text('Vision AI on-device', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+          Text(
+            'Scarica SmolVLM-256M da Hugging Face (~280 MB). Legge le etichette con visione vera '
+            '(non solo OCR). Serve WiFi una volta; poi funziona offline.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+          ),
+          const SizedBox(height: 10),
+          Consumer(
+            builder: (context, ref, _) {
+              final readyAsync = ref.watch(visionModelReadyProvider);
+              return readyAsync.when(
+                loading: () => const LinearProgressIndicator(),
+                error: (e, _) => Text('$e'),
+                data: (ready) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          ready ? Icons.visibility : Icons.cloud_download_outlined,
+                          color: AppColors.teal,
+                        ),
+                        title: Text(ready ? 'SmolVLM-256M pronto' : 'Modello non scaricato'),
+                        subtitle: Text(
+                          ready
+                              ? 'ggml-org/SmolVLM-256M-Instruct-GGUF'
+                              : 'Tocca per scaricare da Hugging Face',
+                        ),
+                      ),
+                      if (_visionProgress != null) ...[
+                        LinearProgressIndicator(value: _visionProgress!.fraction == 0 ? null : _visionProgress!.fraction),
+                        const SizedBox(height: 6),
+                        Text(_visionProgress!.labelMb),
+                        const SizedBox(height: 8),
+                      ],
+                      if (!ready)
+                        FilledButton.icon(
+                          onPressed: _visionDownloading ? null : _downloadVisionModel,
+                          icon: _visionDownloading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Icon(Icons.download),
+                          label: Text(_visionDownloading ? 'Download…' : 'Scarica Vision AI'),
+                        )
+                      else
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            await ref.read(visionModelServiceProvider).deleteModel();
+                            ref.invalidate(visionModelReadyProvider);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Modello eliminato')),
+                            );
+                          },
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Elimina modello'),
+                        ),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+          const SizedBox(height: 28),
           Text('Informazioni', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           const Text(
@@ -370,5 +442,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _downloadVisionModel() async {
+    setState(() {
+      _visionDownloading = true;
+      _visionProgress = null;
+    });
+    try {
+      await ref.read(visionModelServiceProvider).ensureDownloaded(
+            onProgress: (p) {
+              if (mounted) setState(() => _visionProgress = p);
+            },
+          );
+      ref.invalidate(visionModelReadyProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vision AI installata. Usa Scansiona lotto.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download fallito: $e')));
+    } finally {
+      if (mounted) setState(() => _visionDownloading = false);
+    }
   }
 }

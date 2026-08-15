@@ -223,9 +223,31 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
     try {
       final path = await ref.read(documentScanServiceProvider).captureFromCamera();
       if (path == null) return;
-      final result = await ref.read(lotLabelOcrServiceProvider).readFromFile(path);
+
+      final visionReady = await ref.read(visionModelServiceProvider).isReady();
+      LotLabelOcrResult result;
+      if (visionReady) {
+        setState(() => _ocrNote = 'Vision AI (SmolVLM) in lettura…');
+        try {
+          result = await ref.read(visionLabelServiceProvider).readLabelImage(path);
+          if (!mounted) return;
+          _applyOcr(result, source: 'Vision AI SmolVLM');
+          return;
+        } catch (visionErr) {
+          // Fallback OCR se il modello fallisce (RAM, .so, ecc.)
+          if (mounted) {
+            setState(() => _ocrNote = 'Vision fallita ($visionErr). Provo OCR…');
+          }
+        }
+      }
+      result = await ref.read(lotLabelOcrServiceProvider).readFromFile(path);
       if (!mounted) return;
-      _applyOcr(result);
+      _applyOcr(
+        result,
+        source: visionReady
+            ? 'OCR (fallback dopo Vision)'
+            : 'OCR (per migliore precisione: Impostazioni → Scarica Vision AI)',
+      );
     } catch (e) {
       if (mounted) {
         setState(() => _ocrNote = 'Scansione fallita: $e');
@@ -235,7 +257,7 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
     }
   }
 
-  void _applyOcr(LotLabelOcrResult result) {
+  void _applyOcr(LotLabelOcrResult result, {String source = 'OCR'}) {
     setState(() {
       if (result.productName != null) _nameCtrl.text = result.productName!;
       if (result.lotCode != null) _lotCtrl.text = result.lotCode!;
@@ -248,7 +270,7 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
         _locationCtrl.text = 'Frigo';
       }
       if (!result.hasUsefulData) {
-        _ocrNote = 'Poco testo riconosciuto: avvicina l\'etichetta, luce buona, riprova.';
+        _ocrNote = 'Poco riconosciuto ($source). Riprova con più luce o completa a mano.';
       } else {
         final bits = <String>[];
         if (result.productName != null) bits.add('prodotto');
@@ -259,11 +281,10 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
         if (result.ingredients.isNotEmpty) {
           bits.add('${result.ingredients.length} ingredienti');
         }
-        _ocrNote = 'Estratto: ${bits.join(', ')}. Controlla e salva.';
+        _ocrNote = '$source → ${bits.join(', ')}. Controlla e salva.';
       }
     });
   }
-
   Future<void> _save() async {
     if (_nameCtrl.text.trim().isEmpty || _lotCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(

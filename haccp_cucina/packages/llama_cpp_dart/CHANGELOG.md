@@ -1,0 +1,471 @@
+# Changelog
+
+## 0.9.0-dev.10 — llama.cpp b10182, load-mode API, isolate log-callback fix
+
+Native rebuild required — `src/llama.cpp` moved `d6d0ce82` → `afeebe10`
+(tag `b10182`), about seven weeks of upstream work.
+
+### Changed
+
+- Adapted to upstream `e6dd0e29a`, which collapsed the `use_mmap` /
+  `use_direct_io` / `use_mlock` booleans in `llama_model_params` into a
+  single `llama_load_mode` enum. **`ModelParams` keeps its three
+  booleans** — they are mapped at the FFI boundary, so callers are
+  unaffected. One semantic caveat: the enum has no direct-I/O-plus-mlock
+  value, so when both are requested direct I/O wins and mlock is dropped.
+  `useDirectIo` keeps its documented precedence over `useMmap`.
+- Regenerated FFI bindings against the new pin. New upstream C API now
+  reachable but not yet wrapped: `llama_model_n_layer_nextn`,
+  `llama_model_ftype`, `llama_ftype_name`,
+  `llama_vocab_get_suppress_tokens`, and the mtmd batch-encoding API
+  (`mtmd_batch_init` / `_add_chunk` / `_encode` / `_get_output_embd`).
+- `mtmd_encode` is deprecated upstream in favor of `mtmd_encode_chunk`.
+  This package reaches multimodal via `mtmd_helper_eval_chunks` and never
+  called it, so no change was needed.
+
+### Fixed
+
+- **`LlamaLibrary.dispose` now clears the log callback.**
+  `LlamaLog.silence` installs a `Pointer.fromFunction` bound to the
+  isolate that registered it, but the slot it occupies lives in
+  process-global llama.cpp/ggml state and outlives that isolate. The
+  stale pointer stayed installed, so the next isolate to emit a log line
+  invoked a callback owned by a dead isolate and the VM aborted with
+  "Cannot invoke native callback from a different isolate". Surfaced by
+  Dart 3.12's stricter cross-isolate check.
+
+  Known remaining issue: parallel `dart test` still hits the concurrent
+  variant of this race, where one isolate holds a live callback while
+  another loads a model. Run the model-backed suite with `-j 1` until
+  `silence()` stops using a Dart callback altogether.
+
+### Tooling
+
+- `ffigen` 20.1.1 → 21.0.0, `lints` 5.0.0 → 6.1.0 (dev dependencies).
+  Note ffigen 21 requires Dart SDK ≥ 3.10 to run the generator; the
+  package's own `sdk: ^3.5.0` constraint for consumers is unchanged.
+- Fixed the ffigen `-resource-dir` compiler-opt, which pointed at a clang
+  17 toolchain directory that no longer exists.
+
+## 0.9.0-dev.9 — Gemma-4, MTP removed, dynamic Apple framework
+
+Native rebuild required — `src/llama.cpp` moved `6b4e4bd58` → `d6d0ce82`
+(picks up Gemma-4 E2B/E4B MTP support, #24282).
+
+### Removed: MTP / NextN speculative decoding
+
+- **`MtpSpeculativeDecoder` is gone**, along with `ContextType` /
+  `ContextParams.ctxType`. It relied on the NextN hidden-state staging
+  API (`llama_set_embeddings_nextn` / `llama_get_embeddings_nextn_ith`,
+  formerly `*_pre_norm`), which lives only in llama.cpp's private C++
+  header and had to be resolved by hand via C++-mangled symbols. That
+  approach is ABI-fragile (broke on the upstream `pre_norm`→`nextn`
+  rename; would not work under MSVC) and reaches past the public C API.
+  The binding now uses **only** the ffigen-generated public C headers
+  (`llama.h` + mtmd). Classic target+draft `SpeculativeDecoder` (pure C
+  API) is unaffected.
+
+### Changed
+
+- Regenerated FFI bindings against the new pin: `llama_context_params`
+  gains `ctx_other` + `n_outputs_max`; `llama_set_warmup` is deprecated.
+- mtmd: adapt to the upstream video refactor —
+  `mtmd_helper_bitmap_init_from_{file,buf}` now take a `placeholder` bool
+  and return a `mtmd_helper_bitmap_wrapper` (use `.bitmap`).
+
+### Native (Apple)
+
+- The Apple xcframework now ships as a **dynamic** framework (was a static
+  archive). Consumers just **Embed & Sign** — no `-force_load`, which fixes
+  the iOS `dlsym`/dead-strip failure (#104) and a static-framework clean-build
+  ordering trap. It bundles `common` and links Metal/Accelerate internally;
+  the macOS slice uses the versioned bundle layout and each slice is signed
+  with the `org.ggml.llama` identifier so on-device installs validate.
+
+## 0.9.0-dev.8 — MTP speculative decoding, IQ4_NL KV cache
+
+Pure-Dart release on the same llama.cpp pin (tag **`b9360`**, sha
+`6b4e4bd58`) — no native rebuild required.
+
+### MTP (NextN) speculative decoding
+
+- **`MtpSpeculativeDecoder`** — self-speculative decoding driven by a
+  model's own Multi-Token Prediction / NextN heads (no separate draft
+  model). Pair a normal target `LlamaContext` with a draft context
+  created `ctxType: ContextType.mtp` off the **same** model. Mirrors
+  upstream llama.cpp's MTP loop (PR #22673): the target emits pre-norm
+  hidden states, the NextN head proposes tokens conditioned on them, and
+  the target verifies a round in one pass. Output is byte-identical to
+  plain greedy decoding.
+- Works on **M-RoPE / multimodal** models (Qwen3.6, etc.): rejected
+  drafts roll back via `PARTIAL_ONLY | ON_DEVICE` state checkpoints
+  rather than partial `seq_rm`, which those models forbid.
+- Reads pre-norm hidden states through the `llama_set_embeddings_pre_norm`
+  / `llama_get_embeddings_pre_norm_ith` staging symbols (resolved by hand
+  since they are absent from the public header). This **supersedes** the
+  dev.7 note that MTP-as-draft was blocked — it is now implemented.
+- Performance is hardware-dependent: high acceptance (85–92%, output
+  identical to greedy) but on Apple Metal it is ~break-even on MoE and
+  modestly slower on dense vs plain decode (per-submission overhead);
+  expected to win on cheaper-dispatch backends. Probe:
+  `tool/probe_mtp.dart`.
+
+### KV-cache quantization
+
+- **`KvCacheType.iq4_nl`** — exposes `GGML_TYPE_IQ4_NL`, the last
+  upstream-supported KV cache type the binding was missing. ~4×
+  compression like `q4_0` but better quality from a non-linear codebook.
+  See the README's KV-cache quantization section (incl. the symmetric
+  `_0` integer-dot-product property and a note on fork-only TurboQuant).
+
+## 0.9.0-dev.7 — b9360, embeddings, speculative decoding, broad API coverage
+
+llama.cpp submodule bumped from `gguf-v0.18.0-791-g5d56effde` to tag
+**`b9360`** (sha `6b4e4bd58`). 328 commits of upstream history,
+purely-additive C API delta (`llama_context_type`, `llama_n_rs_seq`,
+new `llama_state_seq_flags`, `mtmd_get_cap_from_file`, plus the
+context-params fields `ctx_type` / `n_rs_seq`). Bindings
+regenerated; existing wrapper code unchanged.
+
+### Embeddings
+
+- **`LlamaEngine.embed(text)`** — pooled and per-token embeddings via
+  the worker isolate, with optional L2 normalization. Returns
+  `EmbeddingResult` covering both pooled (mean/cls/last/rank) and
+  unpooled outputs.
+- **`BatchEmbedder`** (sync) + **`LlamaEngine.embedBatch(texts)`**
+  (off-thread) — embed N texts in a single decode pass by assigning
+  each its own sequence id; amortizes per-token compute across the
+  batch for RAG-style ingest. Requires `embeddings: true`, a pooled
+  pooling type, and `nSeqMax >= texts.length`.
+
+### Speculative decoding
+
+- **`SpeculativeDecoder`** — synchronous greedy *and* exact stochastic
+  speculative decoding over a target + draft `LlamaContext` sharing a
+  vocab. Greedy output is byte-identical to plain greedy on the target;
+  `temperature > 0` runs the `min(1, p/q)` accept rule with residual
+  resampling (distributionally identical to sampling the target), seed
+  for reproducibility. See `example/probes/speculative_generate.dart`.
+  (MTP-as-draft is blocked upstream — it needs the non-public
+  `llama_set_embeddings_pre_norm`; the draft-model variant works today.)
+- **`ContextType` + `nRsSeq` on `ContextParams`** — build an MTP draft
+  context against an MTP-capable target model for raw-FFI use.
+
+### New high-level surfaces
+- **`LlamaLora` + `LoraBinding`**, with
+  `LlamaContext.setLoraAdapters` / `clearLoraAdapters` /
+  `setControlVector`. LoRA stack swaps, metadata accessors, aLoRA
+  invocation-token reads, and ReFT-style control vectors.
+- **`MtmdBitmap` / `MtmdChunk` / `MtmdChunks` /
+  `MtmdCapabilities`** — bitmap construction (raw RGB, raw audio,
+  file decode, buffer decode), `mtmd_input_chunks` introspection
+  (kind, nTokens, nPos, id, text-token reads), plus a cheap
+  `mtmd_get_cap_from_file` probe.
+
+### Context introspection and ops
+
+- `nCtxSeq`, `nRsSeq`, effective `poolingType`.
+- Runtime toggles: `setThreads`, `setEmbeddings`, `setCausalAttn`,
+  `setWarmup`, `synchronize`.
+- Memory ops: `memoryClear`, `memorySeqRm`, `memorySeqCp`,
+  `memorySeqKeep`, `memorySeqAdd`, `memorySeqDiv`,
+  `memorySeqPosMin/Max` — covers forking, rollback, position
+  shifting.
+- Logits & probs: `lastLogits`, `logitsAt`, `sampledTokenAt`,
+  `sampledProbsAt`, `sampledCandidatesAt`, `sampledLogitsAt`.
+
+### Diagnostics
+
+- `ContextPerf` / `SamplerPerf` snapshots with `perf()` / `resetPerf()`
+  / `printPerf()` on `LlamaContext` and `Sampler`. Includes
+  prompt/decoded tokens-per-second convenience getters.
+
+### Model / library accessors
+
+- `LlamaModel`: `isDiffusion`, `isHybrid`, `nSwa`, `nEmbdInp`,
+  `nEmbdOut`, `decoderStartToken`, `nClassifierOut`,
+  `classifierLabel(i)`, `ropeType` (new `RopeType` enum),
+  `ropeFreqScaleTrain`, `metaCount` + `metaKeyAt` / `metaValueAt` /
+  `metaValue(key)` / `metaEntries`.
+- `LlamaLibrary`: `supportsMmap` / `Mlock` / `Rpc`,
+  `maxParallelSequences`, `maxTensorBuftOverrides`, `timeUs`,
+  `systemInfo()`, `initNuma(NumaStrategy.*)`.
+- `SplitPath.compose` / `decomposePrefix` for split-gguf filenames.
+
+### Sampler chain introspection
+
+- `name`, `seed`, `chainCount`, `chainGet(i)` (borrowed),
+  `chainRemove(i)` (owned), `clone()`, `apply(arr)`.
+
+### Session state
+
+- `captureRawStateExt` / `restoreRawStateExt` accepting the new
+  `StateSeqFlags` (mirrors `LLAMA_STATE_SEQ_FLAGS_*` including
+  the b9360 on-device snapshot bit).
+
+### Build
+
+- `tool/build_native.sh` disables `LLAMA_BUILD_SERVER` and
+  `LLAMA_BUILD_APP`: upstream b9360's `tools/server/` references
+  mtmd symbols missing from its own public header. We ship neither
+  target, so turning them off keeps `--with-mtmd` building cleanly.
+
+## 0.9.0-dev.6 — option coverage pass
+
+Closes the gap between the Dart binding's option surface and the
+underlying llama.cpp params. Purely additive — existing code keeps
+working with previous defaults.
+
+### Sampling — `SamplerParams`
+
+- `MirostatConfig` (v1 + v2 with `tau`, `eta`, `m`). Terminal sampler
+  when enabled — replaces the `dist` stage.
+- `GrammarConfig` — GBNF grammar plus optional lazy-trigger patterns
+  and trigger tokens (`llama_sampler_init_grammar` /
+  `llama_sampler_init_grammar_lazy_patterns`).
+- `DryConfig` — DRY sampler (multiplier, base, allowed length, last-N,
+  seq breakers).
+- `XtcConfig` — XTC sampler (probability, threshold, min keep, seed).
+- `DynamicTempConfig` — dynamic temperature (`temp_ext`: range,
+  exponent).
+- `AdaptivePConfig` — adaptive-P terminal sampler (target, decay,
+  seed).
+- `LogitBiasEntry` list applied at the start of the chain.
+- `topNSigma`, `infill`, and shared `minKeep` for top-p / min-p /
+  typical / xtc.
+- `SamplerFactory.build(params, model: ...)` — `model:` is now
+  required when the chain uses grammar, DRY, infill, logit-bias, or
+  Mirostat v1 (anything that needs the vocab or `n_ctx_train`).
+
+### Context — `ContextParams`
+
+- `RopeScalingType`, `PoolingType`, `AttentionType` enums.
+- `ropeFreqBase`, `ropeFreqScale`.
+- YaRN: `yarnExtFactor`, `yarnAttnFactor`, `yarnBetaFast`,
+  `yarnBetaSlow`, `yarnOrigCtx`.
+- `defragThreshold`, `noPerf`, `opOffload`, `swaFull`, `kvUnified`.
+
+### Model — `ModelParams`
+
+- `SplitMode` enum + `mainGpu` + `tensorSplit` (allocated to
+  `llama_max_devices()` at load time).
+- `devices` — list of backend device names (resolved from
+  `LlamaBackends.list()`).
+- `kvOverrides` — int / float / bool / string GGUF metadata overrides
+  with the standard NULL-terminated array layout.
+- `useDirectIo`, `useExtraBufts`, `noHost`, `noAlloc`.
+
+### Docs
+
+- README points at the [`aichat`](https://github.com/netdur/imaged-sdk-examples/tree/main/aichat)
+  sample app as a working Flutter integration reference.
+
+### Deferred (tracked for a later cycle)
+
+- `progress_callback`, `cb_eval`, `abort_callback` — need a
+  `NativeCallable.listener` wrapper with isolate-affinity rules.
+- `tensor_buft_overrides` — needs a per-device buffer-type accessor in
+  `BackendDevice` first.
+- Backend sampler chain (`llama_context_params.samplers`) — still
+  marked `[EXPERIMENTAL]` upstream.
+
+## 0.9.0-dev.5 — first pub.dev publish of the rewrite
+
+Consolidates `0.9.0-dev.0` through `0.9.0-dev.5` (none of dev.0–dev.4
+were published to pub.dev). The 0.2.x line is a separate package shape
+— see [MIGRATION.md](MIGRATION.md).
+
+### Highlights since 0.2.x
+
+- `LlamaEngine` worker isolate is the primary public API. Streaming
+  token output via `Stream<GenerationEvent>` (sealed:
+  `TokenEvent` | `ShiftEvent` | `DoneEvent`). Cancellation via stream
+  subscription cancel.
+- `EngineSession` (raw prompt) and `EngineChat` (message-history with
+  chat template) on top of the engine isolate.
+- Multimodal (vision + audio) via llama.cpp's `mtmd`.
+- Persistence: `EngineSession.saveState/loadState` and
+  `EngineChat.saveState/loadState` with metadata-validated reload.
+- `llama-server`-style context shift (`ContextShiftPolicy.auto`) gated
+  on `engine.canShift`.
+- Three platform artifacts shipped from GitHub Releases:
+  - macOS dylib (for `dart test`)
+  - Apple xcframework (`ios-arm64`, `ios-arm64-simulator`, `macos-arm64`)
+  - Android AAR for `arm64-v8a`, two flavors: CPU+mtmd (~2 MB) and
+    Hexagon NPU + OpenCL + mtmd (~3.7 MB)
+
+### Validated end-to-end on real devices
+
+- Galaxy S23 Ultra (Snapdragon 8 Gen 2, Android 14) — Hexagon NPU
+  reachable from a third-party Flutter app on commercial firmware.
+- Galaxy Fold7 (Snapdragon 8 Elite, Android 16) — same APK runs unchanged.
+- MacBook Pro M1 Max (macOS 26) — Metal via dylib path.
+- iPad M1 (iOS 26) — Metal + Accelerate BLAS via the bundled
+  CocoaPods `llama_cpp.podspec`.
+
+### Bindings
+
+- **Backend inspection.** `engine.devices` (`List<BackendDevice>`),
+  `engine.hasAccelerator`, `engine.primaryAcceleratorName`, and the
+  pre-engine `LlamaBackends.list()`. Tells you which backends loaded
+  on the current device.
+- **`primaryAcceleratorName` priority** orders by registry name (HTP →
+  Hexagon → Metal → CUDA → Vulkan) before type, so Snapdragon HTP wins
+  over OpenCL even when ggml reports both as `type=gpu`.
+- **KV-cache quantization.** `ContextParams.typeK` / `typeV` accept any
+  of `KvCacheType.{f32, f16, bf16, q8_0, q4_0, q4_1, q5_0, q5_1}`.
+  `q8_0` halves KV memory at small quality cost; useful on 8 GB Android
+  devices with longer contexts.
+- **Stderr capture.** `LlamaLog.captureToFile(path)` /
+  `LlamaLog.restoreStderr()`. Toggleable redirect of llama.cpp/ggml
+  log lines for Android, where stderr is not connected to logcat.
+- **Auto `ADSP_LIBRARY_PATH`.** `LlamaLibrary.load()` reads
+  `/proc/self/maps` on Android and exports `ADSP_LIBRARY_PATH` so
+  FastRPC finds `libggml-htp-v*.so` skeleton libs without app-side
+  `MethodChannel` plumbing.
+- **`LlamaBindings`** is now exported. Lets callers using the raw FFI
+  surface type variables / pass them around without reaching into
+  `src/`.
+- **`LlamaVersion`** is generated at build time. Exposes the package
+  version, the llama.cpp submodule SHA + author date, and a runtime
+  `systemInfo()` wrapper around `llama_print_system_info()` (e.g.
+  `MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ACCELERATE = 1 | ...`).
+
+### Removed since 0.2.x
+
+- The `Llama` god-class.
+- `LlamaParent` / `LlamaChild` / `IsolateScope` (replaced by `LlamaEngine`).
+- `LlamaService` multi-session scheduler. Mobile apps do one
+  conversation at a time; multi-session can be added back as a higher
+  layer if needed.
+- The MCP client / server / agent surface.
+- `TextChunker` (RAG helper).
+- Hand-written chat-format classes (ChatML, Alpaca, Gemma, Harmony).
+  Modern llama.cpp embeds Jinja templates in the GGUF; we use
+  `llama_chat_apply_template` instead.
+- All non-mobile platform code: Linux, Windows, CUDA, Vulkan desktop.
+  macOS is kept as a dev/test target.
+- Bundled binary distribution. Native artifacts ship from GitHub
+  Releases instead.
+
+### Known limitations
+
+- Custom Jinja chat templates (some Unsloth quants) require manual
+  prompt rendering. Real Jinja support is post-1.0.
+- HTP only engages Q4_0 / Q8_0 quants in upstream ggml-hexagon.
+  K-quants (`Q4_K_*`, `Q5_K_*`) and I-quants (`IQ*`) run on OpenCL+CPU.
+- HTP REPACK budget is ~2 GB per session; ≥7B-class models need a
+  multi-session pattern not yet exposed by the binding.
+- Multimodal generation does not auto-shift on context overflow
+  (matches `llama-server`'s behaviour).
+- Cosmetic: `ggml_metal_device_free` asserts at process exit because
+  the worker doesn't dispose model/context. Harmless.
+
+## 0.9.0-dev.0 — full rewrite
+
+This is effectively a new package. The 0.2.x line was a single-class FFI
+binding glued to a multi-target build system (server, CLI, MCP, multiple
+backends). 0.9.0 throws all of that away and rebuilds around three things:
+**Flutter mobile**, **modular FFI**, and **off-thread inference**.
+
+If you were on 0.2.x, see [MIGRATION.md](MIGRATION.md). The public API does
+not preserve names from 0.2.
+
+### What's new
+
+- `LlamaEngine` worker isolate — primary public API. Streaming token output
+  via `Stream<GenerationEvent>` (sealed: `TokenEvent` | `ShiftEvent` |
+  `DoneEvent`). Cancellation via stream subscription cancel.
+- `EngineSession` (raw prompt) and `EngineChat` (message-history with chat
+  template) on top of the engine isolate.
+- Multimodal (vision + audio) via llama.cpp's `mtmd` — image and audio
+  bytes go to the model unmodified; libmtmd handles decoding.
+- Persistence: `EngineSession.saveState/loadState` and
+  `EngineChat.saveState/loadState` with metadata-validated reload
+  (`StateMetadata`, `LlamaStateException` with discriminator).
+- `llama-server`-style context shift (`ContextShiftPolicy.auto`) gated on
+  `engine.canShift` — falls back gracefully on iSWA / recurrent caches.
+- Three platform artifacts:
+  - macOS dylib for `dart test` (`tool/build_native.sh`)
+  - Apple xcframework with `ios-arm64` + `ios-arm64-simulator` +
+    `macos-arm64` slices (`tool/build_apple_xcframework.sh`)
+  - Android AAR for `arm64-v8a`, CPU + mtmd (`tool/build_android_aar.sh`)
+- `LlamaLibrary.load(path:)` for dylib loading and
+  `LlamaLibrary.loadFromProcess()` for static-linked iOS/macOS apps.
+
+### What's gone (vs 0.2.x)
+
+- The `Llama` god-class.
+- `LlamaParent` / `LlamaChild` / `IsolateScope` (replaced by
+  `LlamaEngine`).
+- `LlamaService` — the multi-session scheduler. Mobile apps do one
+  conversation at a time; multi-session can be added back as a higher
+  layer if needed.
+- The MCP client / server / agent surface.
+- `TextChunker` (RAG helper) — application-layer concern.
+- The `lib/src/prompt/` chat-format classes (ChatML, Alpaca, Gemma,
+  Harmony, ChatML-thinking). Modern llama.cpp embeds the Jinja chat
+  template in the GGUF; we use it via `llama_chat_apply_template`. For
+  models with custom Jinja the matcher can't parse, see
+  `KnownChatTemplates` and the manual-prompt workaround in
+  `example/probes/gemma_chat.dart`.
+- All non-mobile platform code: Linux, Windows, CUDA, OpenCL Linux,
+  Vulkan desktop. macOS is kept as a dev/test target only.
+- The bundled binary distribution path inside the Dart package. Native
+  artifacts ship from GitHub Releases instead.
+
+### Known limitations
+
+- Custom Jinja chat templates (some Unsloth quants) require manual prompt
+  rendering. Real Jinja support is post-1.0.
+- Hexagon NPU AAR is built (`tool/build_android_hexagon_aar.sh`,
+  using `ghcr.io/snapdragon-toolchain/arm64-android:v0.3`) but **not
+  yet validated on a physical Snapdragon device**. The AAR ships
+  six HTP DSP variants (v68/v69/v73/v75/v79/v81) covering Snapdragon
+  865 → 8 Elite + future. Total ~3.7 MB stripped.
+- Multimodal generation does not auto-shift on context overflow (matches
+  llama-server's behaviour). Long multimodal sessions need to be
+  segmented at the application level.
+- Log silencing is off in the worker isolate — `Pointer.fromFunction`
+  callbacks crash when ggml's Metal init logs from a non-Dart thread.
+  Move to `NativeCallable.isolateGroupShared` is queued.
+- Cosmetic: `ggml_metal_device_free` asserts at process exit because the
+  worker doesn't dispose model/context (deliberate — disposing one
+  isolate's model crashes another's outstanding ops). The assert fires
+  after tests pass; harmless.
+
+---
+
+Older entries are preserved below for context. They describe the 0.2.x
+line, which has been removed.
+
+<details>
+<summary>0.2.x history</summary>
+
+## 0.2.3
+*  **Performance**: Moved image embedding storage to native memory (C heap) to reduce Dart GC pressure and improve stability with high-resolution images.
+*  Fix memory leaks in session cancellation and disposal logic.
+
+## 0.2.2
+*  allow freeing the active slot by switching/detaching and reselecting a fallback
+*  ensure isolate child always replies on dispose/free, even when already torn down
+*  keep parent subscription alive through shutdown so free-slot confirmations are received
+*  cancel scope work before freeing slots to avoid in-flight races
+*  add opt-in KV auto-trim (sliding window) with example `example/auto_trim.dart`
+
+## 0.2.1
+* **Android**: Added OpenCL support for GPU acceleration (#91).
+* **Vision**:
+    * Fixed crash in `mtmd` context disposal.
+    * Stable Qwen3-VL support.
+* **Chat**: Added experimental support for Qwen3-VL chat format (`_exportQwen3Jinja`).
+* **Fixes**:
+    * Improved logging initialization (#88).
+    * Fixed stream processing crash in chat.
+* **Core**: Updated `llama.cpp` submodule.
+
+## 0.2.0 — and earlier
+See git history.
+
+</details>
