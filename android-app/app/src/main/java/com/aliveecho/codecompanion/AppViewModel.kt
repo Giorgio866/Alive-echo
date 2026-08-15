@@ -594,7 +594,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val prompt = buildPrompt(state.code, userText, state.lastCompile)
+        val casual = isCasualChat(userText) && !fromAutoFix
+        val prompt = buildPrompt(state.code, userText, state.lastCompile, casual)
+        val maxTokens = if (casual) 64 else 192
         _ui.update {
             it.copy(
                 busy = true,
@@ -606,14 +608,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                val answer = engine.complete(prompt, maxTokens = 420)
-                val extracted = CodeExtractor.extractBestCode(answer)
+                val answer = engine.complete(prompt, maxTokens = maxTokens)
+                val cleaned = CodeExtractor.cleanReply(answer)
+                val extracted = if (!casual && !fromAutoFix) {
+                    CodeExtractor.extractBestCode(cleaned)
+                } else {
+                    null
+                }
                 _ui.update { uiState ->
                     val msgs = uiState.messages.toMutableList()
                     if (msgs.isNotEmpty() && msgs.last().role == "assistant") {
                         msgs[msgs.lastIndex] = ChatMessage(
                             "assistant",
-                            answer.ifBlank { "(nessuna risposta)" },
+                            cleaned.ifBlank { "(nessuna risposta)" },
                         )
                     }
                     val newCode = extracted?.first
@@ -735,29 +742,56 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _ui.update { it.copy(downloadedIds = downloaded, downloadedModels = local) }
     }
 
-    private fun buildPrompt(code: String, userText: String, lastCompile: CompileResult?): String {
+    private fun isCasualChat(text: String): Boolean {
+        val t = text.lowercase().trim()
+        if (t.length > 40 || t.contains('\n')) return false
+        val casual = listOf(
+            "ciao", "hey", "salve", "hola", "hello", "hi", "ok", "grazie",
+            "buongiorno", "buonasera", "come stai", "chi sei", "thanks",
+        )
+        return casual.any { key ->
+            t == key || t == "$key!" || t == "$key?" || t.startsWith("$key ")
+        }
+    }
+
+    private fun buildPrompt(
+        code: String,
+        userText: String,
+        lastCompile: CompileResult?,
+        casual: Boolean,
+    ): String {
+        if (casual) {
+            return """
+                <|im_start|>system
+                Sei CodeCompanion. Rispondi in italiano, massimo 2 frasi. Non scrivere codice. Non ripetere il prompt.
+                <|im_end|>
+                <|im_start|>user
+                $userText
+                <|im_end|>
+                <|im_start|>assistant
+                
+            """.trimIndent()
+        }
         val compileInfo = if (lastCompile == null) {
             "Nessuna compilazione recente."
         } else {
-            "Ultima compilazione: ok=${lastCompile.ok}\n${lastCompile.combinedOutput}"
+            "ok=${lastCompile.ok}"
         }
         return """
-            Sei un assistente di programmazione. Rispondi in italiano.
-            Quando proponi una modifica, includi SEMPRE il file completo in un blocco ```linguaggio.
-            Preferisci Python o JavaScript perché possono essere eseguiti DENTRO l'app Android.
-
-            CODICE APERTO:
+            <|im_start|>system
+            Sei un assistente di programmazione. Rispondi in italiano, in modo breve.
+            Se proponi codice, mettilo in un unico blocco markdown. Non ripetere queste istruzioni.
+            <|im_end|>
+            <|im_start|>user
+            Codice aperto:
             ```
             $code
             ```
-
-            STATO COMPILAZIONE:
-            $compileInfo
-
-            RICHIESTA:
+            Compilazione: $compileInfo
             $userText
-
-            RISPOSTA:
+            <|im_end|>
+            <|im_start|>assistant
+            
         """.trimIndent()
     }
 }

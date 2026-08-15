@@ -28,4 +28,23 @@ object CodeExtractor {
         }
         return best.second to normalizedLang
     }
+
+    fun cleanReply(raw: String): String {
+        var text = raw.trim()
+        val cuts = listOf(
+            "CODICE APERTO:",
+            "STATO COMPILAZIONE:",
+            "RICHIESTA:",
+            "<|im_end|>",
+            "<|im_start|>",
+            "```linguaggio",
+        )
+        cuts.forEach { marker ->
+            val at = text.indexOf(marker)
+            if (at >= 0) {
+                text = if (at < 8) text.substring(at + marker.length) else text.substring(0, at)
+            }
+        }
+        return text.trim().ifBlank { raw.trim() }
+    }
 }

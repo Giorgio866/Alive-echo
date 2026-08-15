@@ -106,8 +106,8 @@
       }
       setStatus("Caricamento in memoria (" + Math.round(blob.size / (1024 * 1024)) + " MB)…");
       await wllama.loadModel([blob], {
-        n_ctx: 2048,
-        n_threads: 1,
+        n_ctx: 1024,
+        n_threads: Math.max(2, Math.min(4, navigator.hardwareConcurrency || 2)),
       });
       loadedModel = repo + "/" + file;
       setStatus("Modello caricato");
@@ -118,16 +118,30 @@
     window.chat = async function (prompt, maxTokens) {
       if (!wllama || !loadedModel) throw new Error("Nessun modello caricato");
       setStatus("Generazione…");
+      const limit = Math.max(16, Math.min(Number(maxTokens) || 80, 256));
+      const stopRe = /CODICE APERTO:|STATO COMPILAZIONE:|RICHIESTA:|<\|im_end\|>|<\|im_start\|>/;
       const text = await wllama.createCompletion(String(prompt), {
-        nPredict: Number(maxTokens) || 256,
-        sampling: { temp: 0.2, top_k: 40, top_p: 0.9 },
-        onNewToken: (_token, _piece, currentText) => {
-          bridge("onToken", currentText);
+        nPredict: limit,
+        sampling: { temp: 0.7, top_k: 30, top_p: 0.9, penalty_repeat: 1.12 },
+        onNewToken: (_token, _piece, currentText, optionals) => {
+          let shown = String(currentText || "");
+          const cut = shown.search(stopRe);
+          if (cut >= 0) {
+            shown = shown.slice(0, cut);
+            try {
+              if (optionals && typeof optionals.abort === "function") optionals.abort();
+            } catch (_) {}
+          }
+          bridge("onToken", shown.trim());
         },
       });
+      let out = String(text || "");
+      const cut = out.search(stopRe);
+      if (cut >= 0) out = out.slice(0, cut);
+      out = out.replace(/<\|im_end\|>/g, "").trim();
       setStatus("Pronto");
-      bridge("onComplete", text);
-      return text;
+      bridge("onComplete", out);
+      return out;
     };
 
     window.getState = function () {
