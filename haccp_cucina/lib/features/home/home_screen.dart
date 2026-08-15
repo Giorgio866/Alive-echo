@@ -115,19 +115,19 @@ class HomeScreen extends ConsumerWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         children: [
                           _QuickAction(
-                            icon: Icons.thermostat_auto,
-                            label: 'Registra\ntemperatura',
-                            onTap: () => context.go('/temperature'),
-                          ),
-                          _QuickAction(
                             icon: Icons.restaurant_menu,
-                            label: 'Preparato\nBlue Eyes',
+                            label: 'Ingredienti\ne preparati',
                             onTap: () => context.go('/ingredients'),
                           ),
                           _QuickAction(
                             icon: Icons.document_scanner_outlined,
-                            label: 'Scansiona\ndocumento',
-                            onTap: () => context.go('/documents'),
+                            label: 'Scansiona\nlotto',
+                            onTap: () => context.go('/lots'),
+                          ),
+                          _QuickAction(
+                            icon: Icons.thermostat_auto,
+                            label: 'Registra\ntemperatura',
+                            onTap: () => context.go('/temperature'),
                           ),
                           _QuickAction(
                             icon: Icons.print_outlined,
@@ -135,9 +135,9 @@ class HomeScreen extends ConsumerWidget {
                             onTap: () => context.go('/labels'),
                           ),
                           _QuickAction(
-                            icon: Icons.add_box_outlined,
-                            label: 'Nuovo\nlotto',
-                            onTap: () => context.go('/lots'),
+                            icon: Icons.folder_open_outlined,
+                            label: 'Documenti\nDDT',
+                            onTap: () => context.go('/documents'),
                           ),
                         ],
                       ),

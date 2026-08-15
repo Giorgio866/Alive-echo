@@ -141,8 +141,8 @@ class MoreHubScreen extends ConsumerWidget {
         children: [
           _HubTile(
             icon: Icons.restaurant_menu,
-            title: 'Preparati / catalogo',
-            subtitle: 'I tuoi ingredienti + etichetta in un tap',
+            title: 'Ingredienti e preparati',
+            subtitle: 'Qui inserisci il catalogo → Preparo → etichetta',
             onTap: () => context.push('/ingredients'),
           ),
           const SizedBox(height: 10),
@@ -190,7 +190,7 @@ class MoreHubScreen extends ConsumerWidget {
           _HubTile(
             icon: Icons.print_outlined,
             title: 'Etichette termiche',
-            subtitle: 'Stampa ESC/POS via Bluetooth',
+            subtitle: 'Bluetooth o WiFi/rete ESC/POS',
             onTap: () => context.push('/labels'),
           ),
           const SizedBox(height: 10),

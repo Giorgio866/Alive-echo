@@ -37,20 +37,37 @@ class _IngredientsScreenState extends ConsumerState<IngredientsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Preparati e catalogo'),
+        title: const Text('Ingredienti e preparati'),
         bottom: TabBar(
           controller: _tabs,
           tabs: const [
-            Tab(text: 'In uso'),
-            Tab(text: 'Catalogo'),
+            Tab(text: '1. Catalogo'),
+            Tab(text: '2. In uso'),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabs,
+      body: Column(
         children: [
-          _ActiveBatchesTab(onRegister: () => _tabs.animateTo(1)),
-          _CatalogTab(onPrepared: () => _tabs.animateTo(0)),
+          Material(
+            color: AppColors.tealSoft.withValues(alpha: 0.45),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              child: Text(
+                'Qui inserisci gli ingredienti (foto menu/PDF o a mano). '
+                'Poi tocca Preparo e stampa l\'etichetta.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                _CatalogTab(onPrepared: () => _tabs.animateTo(1)),
+                _ActiveBatchesTab(onRegister: () => _tabs.animateTo(0)),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -75,8 +92,8 @@ class _ActiveBatchesTab extends ConsumerWidget {
           return EmptyState(
             icon: Icons.restaurant_menu,
             title: 'Nessun preparato attivo',
-            message: 'Carica i tuoi ingredienti (foto + giorni di scadenza) e registra quando li prepari.',
-            cta: FilledButton(onPressed: onRegister, child: const Text('Apri catalogo')),
+            message: 'Vai al Catalogo (passo 1), aggiungi ingredienti, poi tocca Preparo.',
+            cta: FilledButton(onPressed: onRegister, child: const Text('Vai al catalogo ingredienti')),
           );
         }
         return ListView.separated(
@@ -289,6 +306,57 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
     }
   }
 
+  Future<void> _addManualIngredient() async {
+    final nameCtrl = TextEditingController();
+    final daysCtrl = TextEditingController(text: '3');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nuovo ingrediente'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Nome'),
+              autofocus: true,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: daysCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Giorni di scadenza'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annulla')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Salva')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final name = nameCtrl.text.trim();
+    if (name.isEmpty) return;
+    final days = int.tryParse(daysCtrl.text.trim()) ?? 3;
+    await ref.read(haccpRepositoryProvider).upsertCustomIngredient(
+          IngredientCatalogItem(
+            id: 'manual-${DateTime.now().millisecondsSinceEpoch}',
+            name: name,
+            category: 'custom',
+            recommendedDays: days.clamp(1, 60),
+            storageHint: 'In frigo 0-4 °C',
+            source: 'manual',
+          ),
+        );
+    ref.invalidate(ingredientCatalogProvider);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$name aggiunto al catalogo')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final catalogAsync = ref.watch(ingredientCatalogProvider);
@@ -315,12 +383,13 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        'Importa dal menu',
+                        'Passo 1 — inserisci gli ingredienti',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.tealDark),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Foto o PDF del menu: l\'app legge i nomi e tu scegli cosa salvare.',
+                        'Importa dal menu (foto/PDF) oppure aggiungi a mano. '
+                        'Poi tocca Preparo → etichetta.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
                       ),
                       const SizedBox(height: 10),
@@ -343,14 +412,21 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                             icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                             label: const Text('PDF'),
                           ),
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : _addManualIngredient,
+                            icon: const Icon(Icons.add, size: 18),
+                            label: const Text('A mano'),
+                          ),
                         ],
                       ),
                       if (items.isEmpty) ...[
                         const SizedBox(height: 24),
                         const EmptyState(
                           icon: Icons.restaurant_menu,
-                          title: 'Catalogo vuoto',
-                          message: 'Importa il menu con foto o PDF, oppure registra i preparati a mano.',
+                          title: 'Qui vanno gli ingredienti',
+                          message:
+                              'Questo è il posto giusto: carica il menu o aggiungi i prodotti. '
+                              'Dopo usa Preparo per registrare la preparazione e stampare l\'etichetta.',
                         ),
                       ],
                     ],

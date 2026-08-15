@@ -8,6 +8,7 @@ import '../data/models/temperature_models.dart';
 import '../data/repositories/haccp_repository.dart';
 import '../services/document_scan_service.dart';
 import '../services/expiry_notification_service.dart';
+import '../services/lot_label_ocr_service.dart';
 import '../services/menu_catalog_import_service.dart';
 import '../services/monthly_archive_service.dart';
 import '../services/pdf_export_service.dart';
@@ -43,6 +44,12 @@ final temperatureOcrServiceProvider = Provider<TemperatureOcrService>((ref) {
 
 final menuCatalogImportServiceProvider = Provider<MenuCatalogImportService>((ref) {
   final service = MenuCatalogImportService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+final lotLabelOcrServiceProvider = Provider<LotLabelOcrService>((ref) {
+  final service = LotLabelOcrService();
   ref.onDispose(service.dispose);
   return service;
 });

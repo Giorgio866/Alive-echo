@@ -126,6 +126,12 @@ class ExpiryNotificationService {
     await _plugin.cancel(id: (id + 1) & 0x7fffffff);
   }
 
+  Future<void> cancelLot(String lotId) async {
+    if (!_ready) return;
+    final id = ('lot-$lotId').hashCode & 0x7fffffff;
+    await _plugin.cancel(id: id);
+  }
+
   Future<void> showImmediateAlert({required String title, required String body}) async {
     if (!_ready || kIsWeb) return;
     await _plugin.show(
