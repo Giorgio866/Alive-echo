@@ -58,6 +58,7 @@ data class AppUiState(
     val busy: Boolean = false,
     val downloadProgress: Map<String, Float> = emptyMap(),
     val downloadedIds: Set<String> = emptySet(),
+    val downloadedModels: List<HfModel> = emptyList(),
     val error: String? = null,
     val compileMode: CompileMode = CompileMode.LOCAL,
     val compileServerUrl: String = "http://192.168.1.1:8765",
@@ -665,13 +666,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshLocalModels() {
+        refreshDownloaded()
+    }
+
     private fun refreshDownloaded() {
         val all = ModelCatalog.models + _ui.value.customModels
-        val downloaded = all
-            .filter { it.kind == ModelKind.LLM && downloader.isDownloaded(it.repo, it.file) }
-            .map { it.id }
-            .toSet()
-        _ui.update { it.copy(downloadedIds = downloaded) }
+        val local = downloader.listDownloaded(all)
+        val downloaded = local.map { it.id }.toSet() +
+            all.filter { it.kind == ModelKind.LLM && downloader.isDownloaded(it.repo, it.file) }
+                .map { it.id }
+                .toSet()
+        _ui.update { it.copy(downloadedIds = downloaded, downloadedModels = local) }
     }
 
     private fun buildPrompt(code: String, userText: String, lastCompile: CompileResult?): String {

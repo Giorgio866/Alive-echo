@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
                         onAddCustom = viewModel::addCustomGguf,
                         onImagePromptChange = viewModel::updateImagePrompt,
                         onGenerateImage = viewModel::generateImage,
+                        onRefreshLocal = viewModel::refreshLocalModels,
                     )
                     HiddenWebEngines(viewModel)
                 }

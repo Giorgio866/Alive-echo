@@ -50,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
@@ -106,8 +107,12 @@ fun CodeCompanionApp(
     onAddCustom: (String, String) -> Unit,
     onImagePromptChange: (String) -> Unit,
     onGenerateImage: () -> Unit,
+    onRefreshLocal: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(tab) {
+        if (tab == 4) onRefreshLocal()
+    }
 
     Scaffold(
         containerColor = Paper,
@@ -224,6 +229,7 @@ fun CodeCompanionApp(
                     onSearchHf = onSearchHf,
                     onPickHfRepo = onPickHfRepo,
                     onAddCustom = onAddCustom,
+                    onRefreshLocal = onRefreshLocal,
                 )
             }
         }
@@ -699,7 +705,9 @@ private fun ModelsScreen(
     onSearchHf: () -> Unit,
     onPickHfRepo: (HfSearchHit) -> Unit,
     onAddCustom: (String, String) -> Unit,
+    onRefreshLocal: () -> Unit,
 ) {
+    val catalogIds = state.downloadedModels.map { it.repo + "/" + it.file }.toSet()
     LazyColumn(
         Modifier
             .fillMaxSize()
@@ -708,8 +716,48 @@ private fun ModelsScreen(
     ) {
         item {
             Text(
-                "Scegli modello Hugging Face",
+                "Modelli sul telefono",
                 style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Ink,
+            )
+            Text(
+                if (state.downloadedModels.isEmpty()) {
+                    "Nessun file scaricato. Scarica dal catalogo o da Hugging Face."
+                } else {
+                    "Tocca un modello già scaricato per usarlo."
+                },
+                color = Smoke,
+            )
+            TextButton(onClick = onRefreshLocal) { Text("Aggiorna lista") }
+            Text(
+                if (state.engineReady) "Motore chat pronto" else "Motore chat in avvio…",
+                color = if (state.engineReady) Moss else Smoke,
+            )
+            Text(
+                state.loadedModelLabel ?: "Nessun modello chat caricato",
+                color = Smoke,
+                fontSize = 12.sp,
+            )
+        }
+        items(state.downloadedModels, key = { it.id }) { model ->
+            ModelCard(
+                model = model,
+                selected = state.selectedModelId == model.id ||
+                    state.loadedModelLabel?.contains(model.file) == true,
+                downloaded = true,
+                progress = state.downloadProgress[model.id],
+                busy = state.busy,
+                engineReady = state.engineReady,
+                useNow = true,
+                onDownload = { onDownload(model) },
+                onLoad = { onLoad(model) },
+            )
+        }
+        item {
+            Text(
+                "Cerca su Hugging Face",
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = Ink,
             )
@@ -817,7 +865,7 @@ private fun ModelsScreen(
         item {
             Text("I tuoi modelli", fontWeight = FontWeight.SemiBold, color = Ink)
         }
-        items(state.customModels) { model ->
+        items(state.customModels.filter { (it.repo + "/" + it.file) !in catalogIds }) { model ->
             ModelCard(
                 model = model,
                 selected = state.selectedModelId == model.id,
@@ -832,7 +880,7 @@ private fun ModelsScreen(
         item {
             Text("Catalogo", fontWeight = FontWeight.SemiBold, color = Ink)
         }
-        items(ModelCatalog.models) { model ->
+        items(ModelCatalog.models.filter { (it.repo + "/" + it.file) !in catalogIds }) { model ->
             ModelCard(
                 model = model,
                 selected = state.selectedModelId == model.id,
@@ -857,11 +905,13 @@ private fun ModelCard(
     engineReady: Boolean,
     onDownload: () -> Unit,
     onLoad: () -> Unit,
+    useNow: Boolean = false,
 ) {
     val isImage = model.kind == ModelKind.IMAGE
     Column(
         Modifier
             .fillMaxWidth()
+            .clickable(enabled = engineReady) { onLoad() }
             .background(if (selected) Moss.copy(alpha = 0.10f) else Sand, RoundedCornerShape(14.dp))
             .padding(14.dp),
     ) {
@@ -881,7 +931,7 @@ private fun ModelCard(
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (!isImage) {
+            if (!isImage && !useNow) {
                 OutlinedButton(onClick = onDownload) {
                     Icon(Icons.Default.Download, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
@@ -898,7 +948,8 @@ private fun ModelCard(
                 Text(
                     when {
                         isImage -> "Scarica e carica"
-                        selected && downloaded -> "Ricarica"
+                        useNow || downloaded -> "Usa ora"
+                        selected -> "Ricarica"
                         else -> "Carica in AI"
                     },
                 )
