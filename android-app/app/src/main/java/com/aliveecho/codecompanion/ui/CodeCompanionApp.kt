@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -108,6 +109,8 @@ fun CodeCompanionApp(
     onImagePromptChange: (String) -> Unit,
     onGenerateImage: () -> Unit,
     onRefreshLocal: () -> Unit,
+    onLocalQueryChange: (String) -> Unit,
+    onImportUri: (android.net.Uri) -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(tab) {
@@ -230,6 +233,8 @@ fun CodeCompanionApp(
                     onPickHfRepo = onPickHfRepo,
                     onAddCustom = onAddCustom,
                     onRefreshLocal = onRefreshLocal,
+                    onLocalQueryChange = onLocalQueryChange,
+                    onImportUri = onImportUri,
                 )
             }
         }
@@ -706,8 +711,22 @@ private fun ModelsScreen(
     onPickHfRepo: (HfSearchHit) -> Unit,
     onAddCustom: (String, String) -> Unit,
     onRefreshLocal: () -> Unit,
+    onLocalQueryChange: (String) -> Unit,
+    onImportUri: (android.net.Uri) -> Unit,
 ) {
     val catalogIds = state.downloadedModels.map { it.repo + "/" + it.file }.toSet()
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) onImportUri(uri)
+    }
+    val visibleLocal = state.downloadedModels.filter { model ->
+        val q = state.localQuery.trim()
+        q.isEmpty() ||
+            model.name.contains(q, ignoreCase = true) ||
+            model.file.contains(q, ignoreCase = true) ||
+            model.repo.contains(q, ignoreCase = true)
+    }
     LazyColumn(
         Modifier
             .fillMaxSize()
@@ -730,6 +749,32 @@ private fun ModelsScreen(
                 color = Smoke,
             )
             TextButton(onClick = onRefreshLocal) { Text("Aggiorna lista") }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { picker.launch(arrayOf("*/*")) },
+                colors = ButtonDefaults.buttonColors(containerColor = MossDark),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Cerca modelli sul telefono")
+            }
+            Spacer(Modifier.height(8.dp))
+            BasicTextField(
+                value = state.localQuery,
+                onValueChange = onLocalQueryChange,
+                textStyle = TextStyle(color = Ink, fontSize = 16.sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Sand, RoundedCornerShape(10.dp))
+                    .padding(12.dp),
+                decorationBox = { inner ->
+                    if (state.localQuery.isEmpty()) {
+                        Text("Filtra i modelli già sul telefono…", color = Smoke)
+                    }
+                    inner()
+                },
+            )
             Text(
                 if (state.engineReady) "Motore chat pronto" else "Motore chat in avvio…",
                 color = if (state.engineReady) Moss else Smoke,
@@ -740,7 +785,7 @@ private fun ModelsScreen(
                 fontSize = 12.sp,
             )
         }
-        items(state.downloadedModels, key = { it.id }) { model ->
+        items(visibleLocal, key = { it.id }) { model ->
             ModelCard(
                 model = model,
                 selected = state.selectedModelId == model.id ||

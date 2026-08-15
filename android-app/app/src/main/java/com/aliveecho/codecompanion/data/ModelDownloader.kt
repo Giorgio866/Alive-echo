@@ -104,4 +104,34 @@ class ModelDownloader(
             return target
         }
     }
+
+    fun importStream(
+        displayName: String,
+        input: java.io.InputStream,
+        totalBytes: Long,
+        onProgress: (Progress) -> Unit,
+    ): File {
+        modelsDir.mkdirs()
+        val safe = displayName.replace('/', '_').ifBlank { "model.gguf" }
+        val target = File(modelsDir, "phone__$safe")
+        val tmp = File(target.absolutePath + ".part")
+        input.use { src ->
+            tmp.outputStream().use { output ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var readTotal = 0L
+                while (true) {
+                    val read = src.read(buffer)
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    readTotal += read
+                    onProgress(Progress(readTotal, totalBytes))
+                }
+            }
+        }
+        if (!tmp.renameTo(target)) {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
+        }
+        return target
+    }
 }

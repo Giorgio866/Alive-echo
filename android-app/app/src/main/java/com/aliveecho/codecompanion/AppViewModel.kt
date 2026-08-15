@@ -82,6 +82,7 @@ data class AppUiState(
     val loadedImageModel: String? = null,
     val generatingImage: Boolean = false,
     val lastImagePath: String? = null,
+    val localQuery: String = "",
 )
 
 private const val DEFAULT_CODE = """def greet(name):
@@ -348,7 +349,63 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateLocalQuery(value: String) {
+        _ui.update { it.copy(localQuery = value) }
+    }
+
     fun updateHfQuery(value: String) {
+        _ui.update { it.copy(hfQuery = value) }
+    }
+
+    fun importFromUri(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, error = null) }
+            try {
+                val app = getApplication<Application>()
+                val name = displayName(uri)
+                val lower = name.lowercase()
+                if (!lower.endsWith(".gguf") && !lower.endsWith(".bin")) {
+                    throw IllegalStateException("Scegli un file .gguf (modello AI).")
+                }
+                withContext(Dispatchers.IO) {
+                    val resolver = app.contentResolver
+                    val total = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                    resolver.openInputStream(uri)?.use { input ->
+                        downloader.importStream(name, input, total) { p ->
+                            val fraction = if (p.totalBytes > 0) {
+                                p.bytesRead.toFloat() / p.totalBytes.toFloat()
+                            } else {
+                                0f
+                            }
+                            _ui.update { state ->
+                                state.copy(downloadProgress = state.downloadProgress + ("import" to fraction))
+                            }
+                        }
+                    } ?: throw IllegalStateException("Impossibile aprire il file")
+                }
+                refreshDownloaded()
+            } catch (e: Exception) {
+                _ui.update { it.copy(error = e.message ?: "Importazione fallita") }
+            } finally {
+                _ui.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    private fun displayName(uri: android.net.Uri): String {
+        val resolver = getApplication<Application>().contentResolver
+        resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        val value = cursor.getString(idx)
+                        if (!value.isNullOrBlank()) return value
+                    }
+                }
+            }
+        return uri.lastPathSegment?.substringAfterLast('/') ?: "model.gguf"
+    }
         _ui.update { it.copy(hfQuery = value) }
     }
 

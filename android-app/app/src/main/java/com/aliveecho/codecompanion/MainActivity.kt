@@ -61,6 +61,8 @@ class MainActivity : ComponentActivity() {
                         onImagePromptChange = viewModel::updateImagePrompt,
                         onGenerateImage = viewModel::generateImage,
                         onRefreshLocal = viewModel::refreshLocalModels,
+                        onLocalQueryChange = viewModel::updateLocalQuery,
+                        onImportUri = viewModel::importFromUri,
                     )
                     HiddenWebEngines(viewModel)
                 }
