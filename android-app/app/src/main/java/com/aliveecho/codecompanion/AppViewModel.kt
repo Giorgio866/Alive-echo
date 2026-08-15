@@ -83,6 +83,9 @@ data class AppUiState(
     val generatingImage: Boolean = false,
     val lastImagePath: String? = null,
     val localQuery: String = "",
+    val imageProgress: Float = 0f,
+    val imageDownloading: Boolean = false,
+    val imageDownloadLabel: String = "",
 )
 
 private const val DEFAULT_CODE = """def greet(name):
@@ -169,6 +172,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             imageEngine.loadedModel.collect { model ->
                 _ui.update { it.copy(loadedImageModel = model) }
+            }
+        }
+        viewModelScope.launch {
+            imageEngine.progress.collect { p ->
+                _ui.update { state ->
+                    if (!state.imageDownloading && p < 0.02f) return@update state
+                    val id = state.selectedModelId
+                    val merged = maxOf(state.imageProgress, p)
+                    state.copy(
+                        imageProgress = merged,
+                        downloadProgress = if (id != null && state.imageDownloading) {
+                            state.downloadProgress + (id to merged)
+                        } else {
+                            state.downloadProgress
+                        },
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -479,21 +499,115 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         downloadModel(model)
     }
 
+    private var imageLoadJob: Job? = null
+
     fun loadImageModel(model: HfModel) {
         rememberCustom(model)
-        viewModelScope.launch {
-            _ui.update { it.copy(busy = true, error = null, selectedModelId = model.id) }
+        if (imageLoadJob?.isActive == true) return
+        imageLoadJob = viewModelScope.launch {
+            val token = _ui.value.hfToken.ifBlank { null }
+            imageEngine.resetProgress()
+            _ui.update {
+                it.copy(
+                    busy = true,
+                    error = null,
+                    selectedModelId = model.id,
+                    imageDownloading = true,
+                    imageProgress = 0.01f,
+                    imageDownloadLabel = "Preparazione download…",
+                    downloadProgress = it.downloadProgress + (model.id to 0.01f),
+                )
+            }
+            var localBase: String? = null
             try {
+                val already = withContext(Dispatchers.IO) {
+                    downloader.isImageRepoReady(model.repo)
+                }
+                if (!already) {
+                    val files = withContext(Dispatchers.IO) {
+                        val tree = hfApi.listRepoTree(model.repo, token)
+                        hfApi.filesForImageDownload(tree, model.file.ifBlank { "q4" })
+                    }
+                    if (files.isEmpty()) {
+                        _ui.update {
+                            it.copy(imageDownloadLabel = "Nessun file ONNX trovato, provo dal browser…")
+                        }
+                    } else {
+                        val totalMb = files.sumOf { it.size }.toDouble() / (1024.0 * 1024.0)
+                        _ui.update {
+                            it.copy(
+                                imageDownloadLabel = "0/${files.size} file · ${String.format("%.0f", totalMb)} MB",
+                                imageStatus = "Download ${files.size} file ONNX…",
+                            )
+                        }
+                        imageEngine.setStatus("Download ${files.size} file da Hugging Face…")
+                        withContext(Dispatchers.IO) {
+                            downloader.downloadRepoFiles(model.repo, files, token) { p ->
+                                val fraction = if (p.totalBytes > 0) {
+                                    (p.bytesRead.toFloat() / p.totalBytes.toFloat()).coerceIn(0f, 0.90f)
+                                } else if (p.fileCount > 0) {
+                                    (p.fileIndex.toFloat() / p.fileCount.toFloat()).coerceIn(0f, 0.90f)
+                                } else {
+                                    0.05f
+                                }
+                                val name = p.currentFile.substringAfterLast('/')
+                                val label = if (p.fileCount > 0) {
+                                    "${p.fileIndex}/${p.fileCount} · $name"
+                                } else {
+                                    name
+                                }
+                                _ui.update { state ->
+                                    state.copy(
+                                        imageProgress = fraction,
+                                        imageDownloadLabel = label,
+                                        imageStatus = "Download immagini ${(fraction * 100).toInt()}% — $label",
+                                        downloadProgress = state.downloadProgress + (model.id to fraction),
+                                    )
+                                }
+                                imageEngine.setProgress(fraction)
+                                imageEngine.setStatus("Download immagini ${(fraction * 100).toInt()}% — $label")
+                            }
+                        }
+                        refreshDownloaded()
+                    }
+                }
+                if (downloader.isImageRepoReady(model.repo)) {
+                    localBase = "/models/"
+                }
+                _ui.update {
+                    it.copy(
+                        imageProgress = maxOf(it.imageProgress, 0.90f),
+                        imageDownloadLabel = "Caricamento in memoria…",
+                        imageStatus = "File scaricati. Carico il modello…",
+                        downloadProgress = it.downloadProgress + (model.id to maxOf(it.imageProgress, 0.90f)),
+                    )
+                }
+                imageEngine.setProgress(maxOf(_ui.value.imageProgress, 0.90f))
                 imageEngine.loadModel(
                     repo = model.repo,
                     dtype = model.file.ifBlank { "q4" },
-                    token = _ui.value.hfToken.ifBlank { null },
+                    token = token,
+                    localBase = localBase,
                 )
-                _ui.update { it.copy(loadedImageModel = model.repo) }
+                _ui.update {
+                    it.copy(
+                        loadedImageModel = model.repo,
+                        imageProgress = 1f,
+                        imageDownloadLabel = "Completato",
+                        downloadProgress = it.downloadProgress + (model.id to 1f),
+                    )
+                }
             } catch (e: Exception) {
-                _ui.update { it.copy(error = e.message ?: "Caricamento modello immagini fallito") }
+                _ui.update {
+                    it.copy(error = e.message ?: "Caricamento modello immagini fallito")
+                }
             } finally {
-                _ui.update { it.copy(busy = false) }
+                _ui.update {
+                    it.copy(
+                        busy = false,
+                        imageDownloading = false,
+                    )
+                }
             }
         }
     }
@@ -737,6 +851,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val local = downloader.listDownloaded(all)
         val downloaded = local.map { it.id }.toSet() +
             all.filter { it.kind == ModelKind.LLM && downloader.isDownloaded(it.repo, it.file) }
+                .map { it.id }
+                .toSet() +
+            all.filter { it.kind == ModelKind.IMAGE && downloader.isImageRepoReady(it.repo) }
                 .map { it.id }
                 .toSet()
         _ui.update { it.copy(downloadedIds = downloaded, downloadedModels = local) }

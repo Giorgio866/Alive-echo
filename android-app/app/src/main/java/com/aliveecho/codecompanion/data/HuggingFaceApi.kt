@@ -17,6 +17,11 @@ data class HfSearchHit(
     val gated: Boolean,
 )
 
+data class HfRepoFile(
+    val path: String,
+    val size: Long,
+)
+
 class HuggingFaceApi(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -58,6 +63,84 @@ class HuggingFaceApi(
             if (name.isNotBlank()) files += name
         }
         return files
+    }
+
+    fun listRepoTree(repo: String, token: String? = null): List<HfRepoFile> {
+        val url = "https://huggingface.co/api/models/$repo/tree/main?recursive=1"
+        return try {
+            val json = get(url, token)
+            val arr = JSONArray(json)
+            val out = ArrayList<HfRepoFile>(arr.length())
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val type = obj.optString("type")
+                if (type == "directory") continue
+                val path = obj.optString("path").ifBlank { obj.optString("rfilename") }
+                if (path.isBlank()) continue
+                val lfsSize = obj.optJSONObject("lfs")?.optLong("size") ?: 0L
+                val size = if (lfsSize > 0L) lfsSize else obj.optLong("size")
+                out += HfRepoFile(path, size)
+            }
+            out.ifEmpty { listFiles(repo, token).map { HfRepoFile(it, 0L) } }
+        } catch (_: Exception) {
+            listFiles(repo, token).map { HfRepoFile(it, 0L) }
+        }
+    }
+
+    fun filesForImageDownload(files: List<HfRepoFile>, dtype: String): List<HfRepoFile> {
+        val dt = dtype.trim().lowercase().ifBlank { "q4" }
+        val skipExact = setOf("readme.md", "license", "license.md", ".gitattributes")
+        val metaExt = setOf("json", "txt", "model", "jinja", "tiktoken", "vocab")
+        val meta = files.filter { file ->
+            val name = file.path.substringAfterLast('/').lowercase()
+            if (name in skipExact || name.startsWith(".")) return@filter false
+            if (name.endsWith(".md") || name.endsWith(".png") || name.endsWith(".jpg") ||
+                name.endsWith(".jpeg") || name.endsWith(".gif") || name.endsWith(".webp")
+            ) {
+                return@filter false
+            }
+            val ext = name.substringAfterLast('.', "")
+            ext in metaExt || name.contains("tokenizer") || name == "model_index.json"
+        }
+        val onnxAll = files.filter { it.path.contains(".onnx") }
+        val onnx = when {
+            dt == "cpu" || dt == "fp32" -> onnxAll.filter { pathMatchesCpu(it.path) }.ifEmpty { onnxAll }
+            else -> onnxAll.filter { pathMatchesDtype(it.path, dt) }
+                .ifEmpty { onnxAll.filter { it.path.contains("quantized", ignoreCase = true) } }
+                .ifEmpty { onnxAll.filter { pathMatchesCpu(it.path) } }
+                .ifEmpty { onnxAll }
+        }
+        val selected = (meta + onnx).distinctBy { it.path }
+        val selectedPaths = selected.map { it.path }.toSet()
+        val extras = files.filter { file ->
+            file.path.endsWith(".onnx_data") &&
+                file.path.removeSuffix("_data") in selectedPaths &&
+                file.path !in selectedPaths
+        }
+        return selected + extras
+    }
+
+    private fun pathMatchesDtype(path: String, dtype: String): Boolean {
+        val name = path.substringAfterLast('/').lowercase()
+        if (dtype == "q4" && name.contains("q4f16")) return false
+        if (dtype != "q4f16" && name.contains("q4f16")) return false
+        val token = dtype.lowercase()
+        return name.contains("_$token.") ||
+            name.contains("_$token.onnx") ||
+            name.contains("-$token.") ||
+            Regex("""(^|[^a-z0-9])${Regex.escape(token)}([^a-z0-9]|$)""").containsMatchIn(name)
+    }
+
+    private fun pathMatchesCpu(path: String): Boolean {
+        val n = path.lowercase()
+        return !n.contains("_q4") &&
+            !n.contains("_q8") &&
+            !n.contains("q4f16") &&
+            !n.contains("bnb") &&
+            !n.contains("int8") &&
+            !n.contains("uint8") &&
+            !n.contains("fp16") &&
+            !n.contains("quantized")
     }
 
     fun toModelFromRepo(

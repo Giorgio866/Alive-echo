@@ -11,8 +11,8 @@ android {
         applicationId = "com.aliveecho.codecompanion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.5"
+        versionCode = 6
+        versionName = "1.0.6"
     }
 
     buildTypes {

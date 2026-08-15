@@ -68,7 +68,7 @@ object ModelCatalog {
             name = "Janus Pro 1B ONNX (immagini)",
             repo = "onnx-community/Janus-Pro-1B-ONNX",
             file = "q4",
-            sizeLabel = "~1 GB (q4)",
+            sizeLabel = "~3 GB (q4)",
             description = "Genera immagini DENTRO l'app dopo il download. Nessun filtro extra nell'app.",
             tags = listOf("immagini", "uncensored"),
             kind = ModelKind.IMAGE,

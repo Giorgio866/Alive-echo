@@ -129,6 +129,8 @@ fun CodeCompanionApp(
                             color = Ink,
                         )
                         val compileHint = when {
+                            state.imageDownloading ->
+                                "Download img ${(state.imageProgress * 100).toInt()}%"
                             state.generatingImage -> "Immagine…"
                             state.compiling -> "Compilazione…"
                             state.lastCompile?.ok == true -> "Build OK"
@@ -186,6 +188,45 @@ fun CodeCompanionApp(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            if (state.imageDownloading) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Moss.copy(alpha = 0.12f))
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        "Download modello immagini",
+                        fontWeight = FontWeight.SemiBold,
+                        color = Ink,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    if (state.imageProgress <= 0.02f) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Moss,
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            progress = { state.imageProgress.coerceIn(0.02f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Moss,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${(state.imageProgress * 100).toInt()}%  ${state.imageDownloadLabel}",
+                        color = Ink,
+                        fontSize = 13.sp,
+                    )
+                    Text(
+                        state.imageStatus,
+                        color = Smoke,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                    )
+                }
+            }
             if (state.error != null) {
                 Row(
                     Modifier
@@ -650,6 +691,23 @@ private fun ImageScreen(
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
         )
+        if (state.imageDownloading) {
+            Spacer(Modifier.height(10.dp))
+            if (state.imageProgress <= 0.02f) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Moss)
+            } else {
+                LinearProgressIndicator(
+                    progress = { state.imageProgress.coerceIn(0.02f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Moss,
+                )
+            }
+            Text(
+                "${(state.imageProgress * 100).toInt()}%  ${state.imageDownloadLabel}",
+                color = Ink,
+                fontSize = 13.sp,
+            )
+        }
         Spacer(Modifier.height(12.dp))
         BasicTextField(
             value = state.imagePrompt,
@@ -789,11 +847,14 @@ private fun ModelsScreen(
             ModelCard(
                 model = model,
                 selected = state.selectedModelId == model.id ||
-                    state.loadedModelLabel?.contains(model.file) == true,
+                    state.loadedModelLabel?.contains(model.file) == true ||
+                    state.loadedImageModel == model.repo,
                 downloaded = true,
-                progress = state.downloadProgress[model.id],
+                progress = cardProgress(state, model),
+                progressLabel = cardProgressLabel(state, model),
                 busy = state.busy,
-                engineReady = state.engineReady,
+                engineReady = if (model.kind == ModelKind.IMAGE) state.imageEngineReady else state.engineReady,
+                downloading = state.imageDownloading && state.selectedModelId == model.id,
                 useNow = true,
                 onDownload = { onDownload(model) },
                 onLoad = { onLoad(model) },
@@ -856,8 +917,9 @@ private fun ModelsScreen(
                 color = if (state.engineReady) Moss else Smoke,
             )
             Text(
-                if (state.imageEngineReady) "Motore immagini pronto" else "Motore immagini in avvio…",
+                state.imageStatus,
                 color = if (state.imageEngineReady) Moss else Smoke,
+                fontSize = 12.sp,
             )
         }
         if (state.hfResults.isNotEmpty()) {
@@ -915,9 +977,11 @@ private fun ModelsScreen(
                 model = model,
                 selected = state.selectedModelId == model.id,
                 downloaded = model.id in state.downloadedIds,
-                progress = state.downloadProgress[model.id],
+                progress = cardProgress(state, model),
+                progressLabel = cardProgressLabel(state, model),
                 busy = state.busy,
                 engineReady = if (model.kind == ModelKind.IMAGE) state.imageEngineReady else state.engineReady,
+                downloading = state.imageDownloading && state.selectedModelId == model.id,
                 onDownload = { onDownload(model) },
                 onLoad = { onLoad(model) },
             )
@@ -930,14 +994,31 @@ private fun ModelsScreen(
                 model = model,
                 selected = state.selectedModelId == model.id,
                 downloaded = model.id in state.downloadedIds,
-                progress = state.downloadProgress[model.id],
+                progress = cardProgress(state, model),
+                progressLabel = cardProgressLabel(state, model),
                 busy = state.busy,
                 engineReady = if (model.kind == ModelKind.IMAGE) state.imageEngineReady else state.engineReady,
+                downloading = state.imageDownloading && state.selectedModelId == model.id,
                 onDownload = { onDownload(model) },
                 onLoad = { onLoad(model) },
             )
         }
     }
+}
+
+private fun cardProgress(state: AppUiState, model: HfModel): Float? {
+    if (model.kind == ModelKind.IMAGE && state.imageDownloading && state.selectedModelId == model.id) {
+        return state.imageProgress.coerceAtLeast(0.01f)
+    }
+    return state.downloadProgress[model.id]
+}
+
+private fun cardProgressLabel(state: AppUiState, model: HfModel): String? {
+    if (model.kind == ModelKind.IMAGE && state.imageDownloading && state.selectedModelId == model.id) {
+        return state.imageDownloadLabel.ifBlank { state.imageStatus }
+    }
+    val p = state.downloadProgress[model.id]
+    return if (p != null && p < 1f) "${(p * 100).toInt()}%" else null
 }
 
 @Composable
@@ -946,17 +1027,21 @@ private fun ModelCard(
     selected: Boolean,
     downloaded: Boolean,
     progress: Float?,
-    busy: Boolean,
+    @Suppress("UNUSED_PARAMETER") busy: Boolean,
     engineReady: Boolean,
     onDownload: () -> Unit,
     onLoad: () -> Unit,
     useNow: Boolean = false,
+    progressLabel: String? = null,
+    downloading: Boolean = false,
 ) {
     val isImage = model.kind == ModelKind.IMAGE
+    val canStart = if (isImage) true else engineReady
+    val showBar = downloading || (progress != null && progress < 1f)
     Column(
         Modifier
             .fillMaxWidth()
-            .clickable(enabled = engineReady) { onLoad() }
+            .clickable(enabled = canStart && !downloading) { onLoad() }
             .background(if (selected) Moss.copy(alpha = 0.10f) else Sand, RoundedCornerShape(14.dp))
             .padding(14.dp),
     ) {
@@ -970,9 +1055,29 @@ private fun ModelCard(
         Text(model.description, color = Ink)
         Spacer(Modifier.height(4.dp))
         Text("${model.repo}/${model.file}", color = Smoke, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-        if (progress != null && progress < 1f) {
+        if (showBar) {
             Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth(), color = Moss)
+            val pct = progress ?: 0.01f
+            if (pct <= 0.02f) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Moss)
+            } else {
+                LinearProgressIndicator(
+                    progress = { pct.coerceIn(0.02f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Moss,
+                )
+            }
+            Text(
+                buildString {
+                    append("${(pct * 100).toInt()}%")
+                    if (!progressLabel.isNullOrBlank()) {
+                        append("  ")
+                        append(progressLabel)
+                    }
+                },
+                color = Ink,
+                fontSize = 12.sp,
+            )
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -985,13 +1090,15 @@ private fun ModelCard(
             }
             Button(
                 onClick = onLoad,
-                enabled = engineReady,
+                enabled = canStart && !downloading,
                 colors = ButtonDefaults.buttonColors(containerColor = Moss),
             ) {
                 Icon(if (isImage) Icons.Default.Download else Icons.Default.PlayArrow, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text(
                     when {
+                        downloading && isImage -> "Download…"
+                        isImage && downloaded -> "Usa ora"
                         isImage -> "Scarica e carica"
                         useNow || downloaded -> "Usa ora"
                         selected -> "Ricarica"

@@ -10,8 +10,9 @@
   <script type="module">
     import { AutoProcessor, MultiModalityCausalLM, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2";
 
-    env.allowLocalModels = false;
+    env.allowLocalModels = true;
     env.useBrowserCache = true;
+    env.localModelPath = "/models/";
 
     const statusEl = document.getElementById("status");
     let processor = null;
@@ -37,13 +38,29 @@
       try {
         if (!info) return;
         const status = info.status || "";
-        const file = info.file || info.name || "";
-        const loaded = info.loaded || 0;
-        const total = info.total || 0;
-        if (total > 0) {
-          setStatus("Download " + file + ": " + Math.round((loaded / total) * 100) + "%");
+        const file = String(info.file || info.name || "").split("/").pop();
+        if (typeof info.progress === "number" && info.progress > 0) {
+          const pct = info.progress > 1 ? info.progress / 100 : info.progress;
+          bridge("onProgress", String(pct));
+          setStatus("Download " + file + ": " + Math.round(pct * 100) + "%");
+          return;
+        }
+        const loaded = Number(info.loaded || 0);
+        const total = Number(info.total || 0);
+        if (file && total > 0) {
+          window.__imgProg = window.__imgProg || {};
+          window.__imgProg[file] = { loaded: loaded, total: total };
+          let sumL = 0, sumT = 0, n = 0;
+          Object.keys(window.__imgProg).forEach(function (k) {
+            sumL += window.__imgProg[k].loaded;
+            sumT += window.__imgProg[k].total;
+            n++;
+          });
+          const pct = sumT > 0 ? sumL / sumT : 0;
+          bridge("onProgress", String(pct));
+          setStatus("Download immagini " + Math.round(pct * 100) + "% (" + n + " file) — " + file);
         } else {
-          setStatus(status + " " + file);
+          setStatus((status || "Download") + " " + file);
         }
       } catch (e) {}
     }
@@ -83,17 +100,30 @@
       return canvas.toDataURL("image/png");
     }
 
-    window.loadImageModel = async function (repo, dtype, token) {
+    window.loadImageModel = async function (repo, dtype, token, localBase) {
       loadedRepo = null;
       processor = null;
       model = null;
       sdPipe = null;
       const id = String(repo || "").trim();
       const dt = String(dtype || "q4").trim() || "q4";
+      const local = String(localBase || "").trim();
       if (token) {
         env.remoteHost = "https://huggingface.co";
       }
-      setStatus("Download/caricamento modello immagini: " + id);
+      if (local) {
+        env.allowLocalModels = true;
+        env.localModelPath = local.endsWith("/") ? local : local + "/";
+        env.allowRemoteModels = true;
+        env.useBrowserCache = false;
+        setStatus("Carico file locali: " + id);
+      } else {
+        env.allowLocalModels = false;
+        env.allowRemoteModels = true;
+        setStatus("Download/caricamento modello immagini: " + id);
+        bridge("onProgress", "0.02");
+      }
+      window.__imgProg = {};
       const looksSd = /diffusion|sd-|sdxl|turbo|diffusers/i.test(id) || dt === "cpu";
       if (looksSd && !/janus/i.test(id)) {
         backend = "sd";
