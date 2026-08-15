@@ -40,12 +40,18 @@ class MainActivity : ComponentActivity() {
                     CodeCompanionApp(
                         state = state,
                         onCodeChange = viewModel::updateCode,
+                        onLanguageChange = viewModel::updateLanguage,
                         onChatInputChange = viewModel::updateChatInput,
-                        onSendChat = viewModel::sendChat,
+                        onSendChat = { viewModel.sendChat() },
                         onSendCodeToChat = viewModel::sendCodeToChat,
                         onDownload = viewModel::downloadModel,
                         onLoad = viewModel::loadModel,
                         onClearError = viewModel::clearError,
+                        onServerUrlChange = viewModel::updateServerUrl,
+                        onAutoCompileChange = viewModel::setAutoCompile,
+                        onAutoFixChange = viewModel::setAutoFixOnError,
+                        onCheckServer = viewModel::checkServer,
+                        onCompileNow = viewModel::compileNow,
                     )
                     HiddenInferenceWebView(viewModel)
                 }

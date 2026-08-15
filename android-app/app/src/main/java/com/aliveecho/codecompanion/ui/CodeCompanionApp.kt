@@ -1,6 +1,7 @@
 package com.aliveecho.codecompanion.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,16 +21,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -36,14 +41,15 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,12 +77,18 @@ private val Smoke = Color(0xFF5C6670)
 fun CodeCompanionApp(
     state: AppUiState,
     onCodeChange: (String) -> Unit,
+    onLanguageChange: (String) -> Unit,
     onChatInputChange: (String) -> Unit,
     onSendChat: () -> Unit,
     onSendCodeToChat: () -> Unit,
     onDownload: (HfModel) -> Unit,
     onLoad: (HfModel) -> Unit,
     onClearError: () -> Unit,
+    onServerUrlChange: (String) -> Unit,
+    onAutoCompileChange: (Boolean) -> Unit,
+    onAutoFixChange: (Boolean) -> Unit,
+    onCheckServer: () -> Unit,
+    onCompileNow: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
 
@@ -91,8 +103,14 @@ fun CodeCompanionApp(
                             fontWeight = FontWeight.Bold,
                             color = Ink,
                         )
+                        val compileHint = when {
+                            state.compiling -> "Compilazione…"
+                            state.lastCompile?.ok == true -> "Build OK"
+                            state.lastCompile?.ok == false -> "Build errore"
+                            else -> state.engineStatus
+                        }
                         Text(
-                            state.engineStatus,
+                            compileHint,
                             style = MaterialTheme.typography.bodySmall,
                             color = Smoke,
                             maxLines = 1,
@@ -119,6 +137,12 @@ fun CodeCompanionApp(
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
+                    icon = { Icon(Icons.Default.Build, contentDescription = null) },
+                    label = { Text("Build") },
+                )
+                NavigationBarItem(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
                     icon = { Icon(Icons.Default.Memory, contentDescription = null) },
                     label = { Text("Modelli") },
                 )
@@ -143,8 +167,23 @@ fun CodeCompanionApp(
                 }
             }
             when (tab) {
-                0 -> EditorScreen(state, onCodeChange, onSendCodeToChat, onGoChat = { tab = 1 })
+                0 -> EditorScreen(
+                    state = state,
+                    onCodeChange = onCodeChange,
+                    onLanguageChange = onLanguageChange,
+                    onSendCodeToChat = onSendCodeToChat,
+                    onCompileNow = onCompileNow,
+                    onGoChat = { tab = 1 },
+                )
                 1 -> ChatScreen(state, onChatInputChange, onSendChat)
+                2 -> BuildScreen(
+                    state = state,
+                    onServerUrlChange = onServerUrlChange,
+                    onAutoCompileChange = onAutoCompileChange,
+                    onAutoFixChange = onAutoFixChange,
+                    onCheckServer = onCheckServer,
+                    onCompileNow = onCompileNow,
+                )
                 else -> ModelsScreen(state, onDownload, onLoad)
             }
         }
@@ -155,7 +194,9 @@ fun CodeCompanionApp(
 private fun EditorScreen(
     state: AppUiState,
     onCodeChange: (String) -> Unit,
+    onLanguageChange: (String) -> Unit,
     onSendCodeToChat: () -> Unit,
+    onCompileNow: () -> Unit,
     onGoChat: () -> Unit,
 ) {
     Column(
@@ -170,11 +211,13 @@ private fun EditorScreen(
             color = Ink,
         )
         Text(
-            "Scrivi codice qui, poi invialo alla chat AI.",
+            "Compilazione automatica sul PC remoto (scheda Build).",
             color = Smoke,
             style = MaterialTheme.typography.bodyMedium,
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
+        LanguageChips(state.language, onLanguageChange)
+        Spacer(Modifier.height(8.dp))
         Box(
             Modifier
                 .weight(1f)
@@ -197,8 +240,19 @@ private fun EditorScreen(
                     .verticalScroll(rememberScrollState()),
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
+        CompileOutputBox(state)
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onCompileNow,
+                colors = ButtonDefaults.buttonColors(containerColor = MossDark),
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (state.compiling) "…" else "Compila")
+            }
             Button(
                 onClick = {
                     onSendCodeToChat()
@@ -208,10 +262,164 @@ private fun EditorScreen(
                 modifier = Modifier.weight(1f),
             ) {
                 Icon(Icons.Default.Send, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 Text("Invia ad AI")
             }
         }
+    }
+}
+
+@Composable
+private fun LanguageChips(selected: String, onLanguageChange: (String) -> Unit) {
+    val languages = listOf("python", "javascript", "java", "kotlin")
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        languages.forEach { lang ->
+            FilterChip(
+                selected = selected == lang,
+                onClick = { onLanguageChange(lang) },
+                label = { Text(lang) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompileOutputBox(state: AppUiState) {
+    val ok = state.lastCompile?.ok
+    val bg = when (ok) {
+        true -> Color(0xFFDCEFE3)
+        false -> Color(0xFFFFE2E0)
+        null -> Sand
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp, max = 140.dp)
+            .background(bg, RoundedCornerShape(10.dp))
+            .padding(10.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        if (state.compiling) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Moss)
+            Spacer(Modifier.height(6.dp))
+        }
+        Text(
+            state.compileLog,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            color = Ink,
+        )
+    }
+}
+
+@Composable
+private fun BuildScreen(
+    state: AppUiState,
+    onServerUrlChange: (String) -> Unit,
+    onAutoCompileChange: (Boolean) -> Unit,
+    onAutoFixChange: (Boolean) -> Unit,
+    onCheckServer: () -> Unit,
+    onCompileNow: () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        Text(
+            "Compilazione automatica",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = Ink,
+        )
+        Text(
+            "Serve un PC: avvia il compile-server, poi collega l'APK.",
+            color = Smoke,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text("URL server PC", fontWeight = FontWeight.Medium, color = Ink)
+        Spacer(Modifier.height(6.dp))
+        BasicTextField(
+            value = state.compileServerUrl,
+            onValueChange = onServerUrlChange,
+            textStyle = TextStyle(color = Ink, fontFamily = FontFamily.Monospace, fontSize = 14.sp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Sand, RoundedCornerShape(10.dp))
+                .padding(12.dp),
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onCheckServer) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Test connessione")
+            }
+            Button(
+                onClick = onCompileNow,
+                colors = ButtonDefaults.buttonColors(containerColor = Moss),
+            ) {
+                Text("Compila ora")
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        val onlineColor = when (state.serverOnline) {
+            true -> Moss
+            false -> Color(0xFF8A1F17)
+            null -> Smoke
+        }
+        Text(
+            when (state.serverOnline) {
+                true -> "Server online · ${state.serverTools}"
+                false -> "Server offline · ${state.serverTools}"
+                null -> "Stato server sconosciuto"
+            },
+            color = onlineColor,
+        )
+        Spacer(Modifier.height(16.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Auto-compile", fontWeight = FontWeight.Medium, color = Ink)
+                Text("Compila a ogni modifica del codice", color = Smoke, fontSize = 13.sp)
+            }
+            Switch(checked = state.autoCompile, onCheckedChange = onAutoCompileChange)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Auto-fix AI", fontWeight = FontWeight.Medium, color = Ink)
+                Text("Se fallisce, chiede all'AI di correggere", color = Smoke, fontSize = 13.sp)
+            }
+            Switch(checked = state.autoFixOnError, onCheckedChange = onAutoFixChange)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Output", fontWeight = FontWeight.Medium, color = Ink)
+        Spacer(Modifier.height(6.dp))
+        CompileOutputBox(state)
+        Spacer(Modifier.height(16.dp))
+        Text("Sul PC esegui:", fontWeight = FontWeight.Medium, color = Ink)
+        Text(
+            "python3 compile-server/server.py",
+            fontFamily = FontFamily.Monospace,
+            color = Ink,
+            modifier = Modifier
+                .padding(top = 6.dp)
+                .background(Sand, RoundedCornerShape(8.dp))
+                .padding(10.dp)
+                .fillMaxWidth(),
+        )
     }
 }
 
@@ -347,7 +555,7 @@ private fun ModelsScreen(
                 color = Ink,
             )
             Text(
-                "Solo APK: i modelli girano sul telefono. Usa file piccoli (Q4).",
+                "L'AI gira sul telefono. La compilazione gira sul PC.",
                 color = Smoke,
             )
             Spacer(Modifier.height(4.dp))

@@ -1,21 +1,11 @@
 # CodeCompanion
 
-App Android (**solo APK**) per assistenza alla programmazione con modelli GGUF da Hugging Face, in esecuzione locale sul telefono.
+App Android con AI locale (Hugging Face GGUF) + **compilazione automatica** via PC.
 
-## Cosa fa
+## Architettura
 
-- Editor di codice
-- Chat AI locale (via motore WebAssembly llama.cpp / wllama)
-- Catalogo modelli HF (coding + uncensored + test)
-- Download GGUF nella memoria dell'app
-- Caricamento modello in AI direttamente da Hugging Face
-
-## Limiti (voluti)
-
-- Nessun PC remoto
-- Nessuna compilazione automatica tipo Cursor
-- Servono modelli piccoli (Q4, idealmente ≤ 1.5–2 GB) e un telefono con abbastanza RAM
-- La prima volta serve internet per scaricare motore WASM + modello
+- **APK**: editor, chat, modelli, auto-compile client
+- **PC**: `compile-server/server.py` compila/esegue codice
 
 ## Build APK
 
@@ -25,13 +15,20 @@ export ANDROID_HOME=$HOME/android-sdk
 ./gradlew assembleDebug
 ```
 
-APK di output:
+Output: `app/build/outputs/apk/debug/app-debug.apk`
 
-`android-app/app/build/outputs/apk/debug/app-debug.apk`
+## Setup compilazione
 
-## Uso rapido
+1. Sul PC:
+   ```bash
+   python3 compile-server/server.py
+   ```
+2. Nell'app → scheda **Build** → URL tipo `http://IP_DEL_PC:8765`
+3. Attiva **Auto-compile** (già on) e opzionale **Auto-fix AI**
 
-1. Apri **Modelli**
-2. Premi **Carica in AI** su un modello piccolo (parti da TinyLlama o TinyStories per test)
-3. Vai in **Chat** e chiedi aiuto sul codice
-4. Oppure dall'**Editor** usa **Invia ad AI**
+## Flusso
+
+1. Scrivi codice nell'Editor (o chiedi all'AI)
+2. L'app invia il codice al PC
+3. Vedi output/errori sotto l'editor
+4. Se fallisce e Auto-fix è on, l'AI prova a correggere
