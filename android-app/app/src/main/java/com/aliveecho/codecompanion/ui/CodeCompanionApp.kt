@@ -676,17 +676,21 @@ private fun ImageScreen(
             color = Ink,
         )
         Text(
-            "Scarica un modello immagini da Hugging Face, poi genera qui. Nessun filtro extra nell'app.",
+            "Sul telefono Janus non entra in RAM (file da 1 GB). Premi Genera: è veloce e senza filtri extra.",
             color = Smoke,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            if (state.imageEngineReady) state.imageStatus else "Motore immagini in avvio…",
-            color = if (state.imageEngineReady) Moss else Smoke,
+            state.imageStatus,
+            color = Moss,
             fontWeight = FontWeight.Medium,
         )
         Text(
-            state.loadedImageModel ?: "Nessun modello immagini caricato",
+            if (state.loadedImageModel == null || state.loadedImageModel == "veloce") {
+                "Motore veloce · nessun download"
+            } else {
+                state.loadedImageModel.orEmpty()
+            },
             color = Smoke,
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
@@ -729,7 +733,7 @@ private fun ImageScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = onGenerate,
-                enabled = !state.generatingImage && !state.busy && state.loadedImageModel != null,
+                enabled = !state.generatingImage && state.imagePrompt.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Moss),
                 modifier = Modifier.weight(1f),
             ) {
@@ -753,7 +757,7 @@ private fun ImageScreen(
                     .background(Ink, RoundedCornerShape(12.dp)),
             )
         } else {
-            Text("Nessuna immagine ancora. Carica un modello e premi Genera.", color = Smoke)
+            Text("Nessuna immagine ancora. Scrivi un prompt e premi Genera.", color = Smoke)
         }
     }
 }
@@ -1098,7 +1102,7 @@ private fun ModelCard(
                 Text(
                     when {
                         downloading && isImage -> "Download…"
-                        isImage && downloaded -> "Usa ora"
+                        isImage && (downloaded || model.repo == "phone/fast") -> "Usa ora"
                         isImage -> "Scarica e carica"
                         useNow || downloaded -> "Usa ora"
                         selected -> "Ricarica"

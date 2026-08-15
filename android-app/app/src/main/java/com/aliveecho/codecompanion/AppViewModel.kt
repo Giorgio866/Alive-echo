@@ -12,6 +12,7 @@ import com.aliveecho.codecompanion.data.HfSearchHit
 import com.aliveecho.codecompanion.data.HuggingFaceApi
 import com.aliveecho.codecompanion.data.ModelDownloader
 import com.aliveecho.codecompanion.image.ImageEngine
+import com.aliveecho.codecompanion.image.PhoneImageClient
 import com.aliveecho.codecompanion.inference.InferenceEngine
 import com.aliveecho.codecompanion.runtime.LocalRuntimeEngine
 import org.json.JSONArray
@@ -77,7 +78,7 @@ data class AppUiState(
     val selectedHfRepo: String? = null,
     val customModels: List<HfModel> = emptyList(),
     val imagePrompt: String = "",
-    val imageStatus: String = "Motore immagini in avvio…",
+    val imageStatus: String = "Motore veloce pronto. Scrivi un prompt e premi Genera.",
     val imageEngineReady: Boolean = false,
     val loadedImageModel: String? = null,
     val generatingImage: Boolean = false,
@@ -107,6 +108,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val engine = InferenceEngine(application)
     val localRuntime = LocalRuntimeEngine()
     val imageEngine = ImageEngine()
+    private val phoneImages = PhoneImageClient(application.filesDir.resolve("images"))
     private val downloader = ModelDownloader(application.filesDir.resolve("models"))
     private val compileClient = CompileClient()
     private val hfApi = HuggingFaceApi()
@@ -504,6 +506,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun loadImageModel(model: HfModel) {
         rememberCustom(model)
         if (imageLoadJob?.isActive == true) return
+        if (isPhoneFastImage(model) || isHeavyImageModel(model)) {
+            _ui.update {
+                it.copy(
+                    selectedModelId = model.id,
+                    loadedImageModel = "veloce",
+                    imageDownloading = false,
+                    imageProgress = 1f,
+                    imageDownloadLabel = "",
+                    imageStatus = "Motore veloce pronto. Scrivi un prompt e premi Genera.",
+                    error = if (isHeavyImageModel(model) && !isPhoneFastImage(model)) {
+                        "Janus/SD non entra nella RAM del telefono (un file da ~1 GB). Non lo carico. Premi Genera: è immediato."
+                    } else {
+                        null
+                    },
+                )
+            }
+            imageEngine.setStatus("Motore veloce pronto. Scrivi un prompt e premi Genera.")
+            return
+        }
         imageLoadJob = viewModelScope.launch {
             val token = _ui.value.hfToken.ifBlank { null }
             imageEngine.resetProgress()
@@ -527,6 +548,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val files = withContext(Dispatchers.IO) {
                         val tree = hfApi.listRepoTree(model.repo, token)
                         hfApi.filesForImageDownload(tree, model.file.ifBlank { "q4" })
+                    }
+                    val tooBig = files.any { it.size > 350L * 1024 * 1024 }
+                    if (tooBig) {
+                        throw IllegalStateException(
+                            "Questo modello ha file da oltre 350 MB: il telefono non può caricarli in memoria. Usa Immagini veloci e premi Genera.",
+                        )
                     }
                     if (files.isEmpty()) {
                         _ui.update {
@@ -570,6 +597,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         refreshDownloaded()
                     }
+                } else if (largestLocalOnnx(model.repo) > 350L * 1024 * 1024) {
+                    throw IllegalStateException(
+                        "I file già scaricati sono troppo grandi per la RAM. Usa Immagini veloci e premi Genera.",
+                    )
                 }
                 if (downloader.isImageRepoReady(model.repo)) {
                     localBase = "/models/"
@@ -599,7 +630,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 _ui.update {
-                    it.copy(error = e.message ?: "Caricamento modello immagini fallito")
+                    it.copy(
+                        error = friendlyImageError(e.message),
+                        loadedImageModel = "veloce",
+                        imageStatus = "Motore veloce pronto. Premi Genera.",
+                    )
                 }
             } finally {
                 _ui.update {
@@ -618,25 +653,81 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _ui.update { it.copy(error = "Scrivi un prompt per l'immagine.") }
             return
         }
-        if (_ui.value.loadedImageModel == null) {
-            _ui.update { it.copy(error = "Prima scarica/carica un modello immagini nella scheda Modelli.") }
-            return
-        }
         viewModelScope.launch {
-            _ui.update { it.copy(generatingImage = true, error = null) }
+            _ui.update { it.copy(generatingImage = true, error = null, imageStatus = "Generazione…") }
             try {
-                val dataUrl = imageEngine.generate(prompt)
-                val path = withContext(Dispatchers.IO) { saveDataUrl(dataUrl) }
-                _ui.update { it.copy(lastImagePath = path, generatingImage = false) }
+                val localReady = _ui.value.loadedImageModel != null &&
+                    _ui.value.loadedImageModel != "veloce" &&
+                    imageEngine.loadedModel.value != null
+                val path = if (localReady) {
+                    try {
+                        val dataUrl = imageEngine.generate(prompt)
+                        withContext(Dispatchers.IO) { saveDataUrl(dataUrl) }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.IO) {
+                            phoneImages.generate(prompt) { msg ->
+                                _ui.update { it.copy(imageStatus = msg) }
+                            }
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.IO) {
+                        phoneImages.generate(prompt) { msg ->
+                            _ui.update { it.copy(imageStatus = msg) }
+                        }
+                    }
+                }
+                _ui.update {
+                    it.copy(
+                        lastImagePath = path,
+                        generatingImage = false,
+                        loadedImageModel = it.loadedImageModel ?: "veloce",
+                        imageStatus = "Immagine pronta",
+                    )
+                }
             } catch (e: Exception) {
                 _ui.update {
                     it.copy(
                         generatingImage = false,
-                        error = e.message ?: "Generazione immagine fallita",
+                        error = friendlyImageError(e.message),
+                        imageStatus = "Generazione fallita",
                     )
                 }
             }
         }
+    }
+
+    private fun isPhoneFastImage(model: HfModel): Boolean {
+        return model.id == "fast-phone" || model.repo.equals("phone/fast", ignoreCase = true)
+    }
+
+    private fun isHeavyImageModel(model: HfModel): Boolean {
+        if (model.kind != ModelKind.IMAGE) return false
+        val blob = (model.repo + " " + model.name + " " + model.id).lowercase()
+        return blob.contains("janus") ||
+            blob.contains("stable-diffusion") ||
+            blob.contains("sd21") ||
+            blob.contains("diffusion")
+    }
+
+    private fun largestLocalOnnx(repo: String): Long {
+        val dir = downloader.imageRepoDir(repo)
+        if (!dir.isDirectory) return 0L
+        return dir.walkTopDown()
+            .filter { it.isFile && it.name.contains(".onnx") }
+            .maxOfOrNull { it.length() } ?: 0L
+    }
+
+    private fun friendlyImageError(message: String?): String {
+        val msg = message.orEmpty()
+        if (
+            msg.contains("allocate a buffer", ignoreCase = true) ||
+            msg.contains("Can't create a session", ignoreCase = true) ||
+            msg.contains("failed to allocate", ignoreCase = true)
+        ) {
+            return "Il modello è troppo grande per la RAM del telefono (un pezzo da ~1 GB). Non serve caricarlo: premi Genera, usa il motore veloce."
+        }
+        return message ?: "Operazione immagini fallita"
     }
 
     private fun saveDataUrl(dataUrl: String): String {

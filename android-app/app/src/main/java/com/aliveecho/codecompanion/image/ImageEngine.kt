@@ -24,7 +24,7 @@ class ImageEngine {
     private val _ready = MutableStateFlow(false)
     val ready: StateFlow<Boolean> = _ready.asStateFlow()
 
-    private val _status = MutableStateFlow("Motore immagini non avviato")
+    private val _status = MutableStateFlow("Motore veloce pronto")
     val status: StateFlow<String> = _status.asStateFlow()
 
     private val _loadedModel = MutableStateFlow<String?>(null)

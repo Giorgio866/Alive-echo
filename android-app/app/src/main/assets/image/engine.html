@@ -6,20 +6,15 @@
   <title>CodeCompanion Image Engine</title>
 </head>
 <body>
-  <div id="status">Motore immagini in avvio…</div>
+  <div id="status">Motore veloce pronto</div>
   <script type="module">
-    import { AutoProcessor, MultiModalityCausalLM, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2";
-
-    env.allowLocalModels = true;
-    env.useBrowserCache = true;
-    env.localModelPath = "/models/";
-
     const statusEl = document.getElementById("status");
     let processor = null;
     let model = null;
     let loadedRepo = null;
     let sdPipe = null;
-    let backend = "janus";
+    let backend = "fast";
+    let tf = null;
 
     function bridge(fn, arg) {
       try {
@@ -65,14 +60,21 @@
       } catch (e) {}
     }
 
+    async function ensureTf() {
+      if (tf) return tf;
+      setStatus("Carico libreria ONNX (solo modelli locali)…");
+      tf = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2");
+      tf.env.allowLocalModels = true;
+      tf.env.useBrowserCache = true;
+      tf.env.localModelPath = "/models/";
+      return tf;
+    }
+
     async function rawToDataUrl(raw) {
       if (!raw) throw new Error("Nessuna immagine generata");
       if (typeof raw.toCanvas === "function") {
         const canvas = raw.toCanvas();
         return canvas.toDataURL("image/png");
-      }
-      if (typeof raw.save === "function" && typeof OffscreenCanvas !== "undefined") {
-        // fall through to pixel copy
       }
       const width = raw.width;
       const height = raw.height;
@@ -108,6 +110,8 @@
       const id = String(repo || "").trim();
       const dt = String(dtype || "q4").trim() || "q4";
       const local = String(localBase || "").trim();
+      const libs = await ensureTf();
+      const env = libs.env;
       if (token) {
         env.remoteHost = "https://huggingface.co";
       }
@@ -147,8 +151,8 @@
         progress_callback: progressCb,
       };
       if (token) loadOpts.token = token;
-      processor = await AutoProcessor.from_pretrained(id, loadOpts);
-      model = await MultiModalityCausalLM.from_pretrained(id, loadOpts);
+      processor = await libs.AutoProcessor.from_pretrained(id, loadOpts);
+      model = await libs.MultiModalityCausalLM.from_pretrained(id, loadOpts);
       loadedRepo = id;
       setStatus("Modello immagini pronto (nessun filtro extra)");
       bridge("onModelLoaded", id);
@@ -156,7 +160,7 @@
     };
 
     window.generateImage = async function (prompt, steps) {
-      if (!loadedRepo) throw new Error("Nessun modello immagini caricato");
+      if (!loadedRepo) throw new Error("Nessun modello locale caricato");
       const text = String(prompt || "").trim();
       if (!text) throw new Error("Prompt vuoto");
       setStatus("Generazione immagine…");
@@ -193,7 +197,7 @@
       return url;
     };
 
-    setStatus("Motore immagini pronto. Carica un modello.");
+    setStatus("Motore veloce pronto. Genera senza scaricare 3 GB.");
     bridge("onReady", "ok");
   </script>
 </body>
