@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/models/document_models.dart';
+import '../../data/models/product_lot.dart';
 import '../../providers/app_providers.dart';
 import '../../theme/app_theme.dart';
 
@@ -17,29 +18,27 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
   final _productCtrl = TextEditingController();
   final _lotCtrl = TextEditingController();
   final _allergensCtrl = TextEditingController();
-  final _storageCtrl = TextEditingController(text: 'In frigo 0–4 °C');
   DateTime _preparedAt = DateTime.now();
   DateTime _useBy = DateTime.now().add(const Duration(days: 2));
   int _copies = 1;
   String _preview = '';
+  String? _selectedLotId;
 
   @override
   void dispose() {
     _productCtrl.dispose();
     _lotCtrl.dispose();
     _allergensCtrl.dispose();
-    _storageCtrl.dispose();
     super.dispose();
   }
 
   LabelDraft _draft(String operatorName) => LabelDraft(
         productName: _productCtrl.text.trim().isEmpty ? 'Prodotto' : _productCtrl.text.trim(),
-        lotCode: _lotCtrl.text.trim().isEmpty ? null : _lotCtrl.text.trim(),
+        lotCode: _lotCtrl.text.trim(),
         preparedAt: _preparedAt,
         useBy: _useBy,
         allergens: _allergensCtrl.text.trim().isEmpty ? null : _allergensCtrl.text.trim(),
         operatorName: operatorName,
-        storageHint: _storageCtrl.text.trim().isEmpty ? null : _storageCtrl.text.trim(),
         copies: _copies,
       );
 
@@ -50,6 +49,51 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
           activityName: settings.activityName,
         );
     setState(() => _preview = text);
+  }
+
+  Future<void> _pickFromLots() async {
+    final lots = await ref.read(haccpRepositoryProvider).getLots();
+    if (!mounted) return;
+    if (lots.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nessun lotto: scansiona un prodotto in Lotti')),
+      );
+      return;
+    }
+    final chosen = await showModalBottomSheet<ProductLot>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Text('Seleziona lotto da stampare', style: Theme.of(ctx).textTheme.titleMedium),
+            ),
+            ...lots.map(
+              (l) => ListTile(
+                title: Text(l.productName),
+                subtitle: Text(
+                  'Lotto ${l.lotCode}'
+                  '${l.effectiveExpiry != null ? ' · scad. ${DateFormat('dd/MM/yyyy').format(l.effectiveExpiry!)}' : ''}',
+                ),
+                onTap: () => Navigator.pop(ctx, l),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null) return;
+    setState(() {
+      _selectedLotId = chosen.id;
+      _productCtrl.text = chosen.productName;
+      _lotCtrl.text = chosen.lotCode;
+      if (chosen.allergens != null) _allergensCtrl.text = chosen.allergens!;
+      _preparedAt = chosen.openedAt ?? chosen.receivedAt;
+      if (chosen.effectiveExpiry != null) _useBy = chosen.effectiveExpiry!;
+    });
+    await _refreshPreview();
   }
 
   @override
@@ -69,8 +113,14 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
           Text(
-            'Genera etichette HACCP per preparati, salse e semilavorati pizza.',
+            'L\'etichetta include sempre il numero di lotto. Puoi scegliere un lotto già scansionato.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.slateMuted),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.tonalIcon(
+            onPressed: _pickFromLots,
+            icon: const Icon(Icons.inventory_2_outlined),
+            label: Text(_selectedLotId == null ? 'Seleziona lotto salvato' : 'Cambia lotto selezionato'),
           ),
           const SizedBox(height: 16),
           TextField(
@@ -81,7 +131,10 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
           const SizedBox(height: 10),
           TextField(
             controller: _lotCtrl,
-            decoration: const InputDecoration(labelText: 'Lotto (opzionale)'),
+            decoration: const InputDecoration(
+              labelText: 'Numero di lotto (obbligatorio)',
+              helperText: 'Comparirà in evidenza sull\'etichetta',
+            ),
             onChanged: (_) => _refreshPreview(),
           ),
           const SizedBox(height: 10),
@@ -90,50 +143,42 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
             decoration: const InputDecoration(labelText: 'Allergeni'),
             onChanged: (_) => _refreshPreview(),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _storageCtrl,
-            decoration: const InputDecoration(labelText: 'Conservazione'),
-            onChanged: (_) => _refreshPreview(),
-          ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: OutlinedButton(
                   onPressed: () async {
-                    final d = await showDatePicker(
+                    final picked = await showDatePicker(
                       context: context,
                       initialDate: _preparedAt,
-                      firstDate: DateTime.now().subtract(const Duration(days: 7)),
+                      firstDate: DateTime.now().subtract(const Duration(days: 30)),
                       lastDate: DateTime.now().add(const Duration(days: 1)),
                     );
-                    if (d != null) {
-                      setState(() => _preparedAt = d);
+                    if (picked != null) {
+                      setState(() => _preparedAt = picked);
                       await _refreshPreview();
                     }
                   },
-                  icon: const Icon(Icons.schedule),
-                  label: Text('Prep. ${DateFormat('dd/MM').format(_preparedAt)}'),
+                  child: Text('Prep. ${DateFormat('dd/MM').format(_preparedAt)}'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: OutlinedButton.icon(
+                child: OutlinedButton(
                   onPressed: () async {
-                    final d = await showDatePicker(
+                    final picked = await showDatePicker(
                       context: context,
                       initialDate: _useBy,
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(const Duration(days: 60)),
+                      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
                     );
-                    if (d != null) {
-                      setState(() => _useBy = d);
+                    if (picked != null) {
+                      setState(() => _useBy = picked);
                       await _refreshPreview();
                     }
                   },
-                  icon: const Icon(Icons.event_busy),
-                  label: Text('Scad. ${DateFormat('dd/MM').format(_useBy)}'),
+                  child: Text('Scad. ${DateFormat('dd/MM').format(_useBy)}'),
                 ),
               ),
             ],
@@ -142,41 +187,40 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
           Row(
             children: [
               const Text('Copie'),
-              Expanded(
-                child: Slider(
-                  value: _copies.toDouble(),
-                  min: 1,
-                  max: 10,
-                  divisions: 9,
-                  label: '$_copies',
-                  onChanged: (v) {
-                    setState(() => _copies = v.round());
-                    _refreshPreview();
-                  },
-                ),
+              const SizedBox(width: 12),
+              IconButton(
+                onPressed: _copies > 1
+                    ? () {
+                        setState(() => _copies--);
+                        _refreshPreview();
+                      }
+                    : null,
+                icon: const Icon(Icons.remove_circle_outline),
               ),
-              Text('$_copies'),
+              Text('$_copies', style: Theme.of(context).textTheme.titleMedium),
+              IconButton(
+                onPressed: () {
+                  setState(() => _copies++);
+                  _refreshPreview();
+                },
+                icon: const Icon(Icons.add_circle_outline),
+              ),
             ],
           ),
+          const SizedBox(height: 16),
+          Text('Anteprima', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A),
+              color: AppColors.surfaceElevated,
               borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.12),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              border: Border.all(color: AppColors.slate.withValues(alpha: 0.12)),
             ),
             child: Text(
-              _preview.isEmpty ? 'Anteprima etichetta…' : _preview,
+              _preview.isEmpty ? '…' : _preview,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFFE8E8E8),
                     fontFamily: 'monospace',
                     height: 1.35,
                   ),
@@ -191,18 +235,24 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Text(
-                'La stampa ESC/POS è attiva su Android (Bluetooth o WiFi/rete). Qui puoi comunque preparare il layout.',
+                'La stampa ESC/POS è attiva su Android (Bluetooth o WiFi/rete).',
               ),
             )
           else
             Text(
-              'Usa la stampante salvata in Impostazioni (Bluetooth oppure WiFi IP:porta / bridge).',
+              'Stampante da Impostazioni (Bluetooth o WiFi IP:porta).',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
             ),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: () async {
               final messenger = ScaffoldMessenger.of(context);
+              if (_lotCtrl.text.trim().isEmpty) {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Inserisci il numero di lotto oppure seleziona un lotto')),
+                );
+                return;
+              }
               final s = settings.value ?? await ref.read(settingsServiceProvider).load();
               try {
                 await ref.read(thermalPrintServiceProvider).printLabel(
@@ -211,13 +261,11 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
                     );
                 if (!mounted) return;
                 messenger.showSnackBar(
-                  const SnackBar(content: Text('Etichetta inviata alla stampante')),
+                  const SnackBar(content: Text('Etichetta inviata (con lotto)')),
                 );
               } catch (e) {
                 if (!mounted) return;
-                messenger.showSnackBar(
-                  SnackBar(content: Text('$e')),
-                );
+                messenger.showSnackBar(SnackBar(content: Text('$e')));
               }
             },
             icon: const Icon(Icons.print),

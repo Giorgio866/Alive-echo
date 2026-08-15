@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
 import '../data/models/document_models.dart';
+import '../data/models/product_lot.dart';
 import 'settings_service.dart';
 
 enum PrinterConnectionType { bluetooth, network }
@@ -151,6 +152,7 @@ class ThermalPrintService {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
     final bytes = <int>[];
+    final lot = (draft.lotCode ?? '').trim().isEmpty ? 'N/D' : draft.lotCode!.trim();
 
     bytes.addAll(generator.reset());
     bytes.addAll(generator.text(
@@ -166,17 +168,15 @@ class ThermalPrintService {
       draft.productName,
       styles: const PosStyles(bold: true, height: PosTextSize.size2, width: PosTextSize.size2),
     ));
-    if (draft.lotCode != null && draft.lotCode!.isNotEmpty) {
-      bytes.addAll(generator.text('Lotto: ${draft.lotCode}'));
-    }
+    bytes.addAll(generator.text(
+      'LOTTO: $lot',
+      styles: const PosStyles(bold: true, height: PosTextSize.size2),
+    ));
     bytes.addAll(generator.text('Prep.: ${_dateFmt.format(draft.preparedAt)}'));
     bytes.addAll(generator.text(
       'Scadenza: ${_dayFmt.format(draft.useBy)}',
       styles: const PosStyles(bold: true),
     ));
-    if (draft.storageHint != null && draft.storageHint!.isNotEmpty) {
-      bytes.addAll(generator.text('Conservazione: ${draft.storageHint}'));
-    }
     if (draft.allergens != null && draft.allergens!.isNotEmpty) {
       bytes.addAll(generator.text('Allergeni: ${draft.allergens}'));
     }
@@ -194,20 +194,15 @@ class ThermalPrintService {
   }
 
   Future<String> previewText(LabelDraft draft, {String activityName = 'HACCP'}) async {
+    final lot = (draft.lotCode ?? '').trim().isEmpty ? 'N/D' : draft.lotCode!.trim();
     final buf = StringBuffer()
       ..writeln(activityName.toUpperCase())
       ..writeln('ETICHETTA ALIMENTARE')
       ..writeln('------------------------------')
-      ..writeln(draft.productName);
-    if (draft.lotCode != null && draft.lotCode!.isNotEmpty) {
-      buf.writeln('Lotto: ${draft.lotCode}');
-    }
-    buf
+      ..writeln(draft.productName)
+      ..writeln('LOTTO: $lot')
       ..writeln('Prep.: ${_dateFmt.format(draft.preparedAt)}')
       ..writeln('Scadenza: ${_dayFmt.format(draft.useBy)}');
-    if (draft.storageHint != null && draft.storageHint!.isNotEmpty) {
-      buf.writeln('Conservazione: ${draft.storageHint}');
-    }
     if (draft.allergens != null && draft.allergens!.isNotEmpty) {
       buf.writeln('Allergeni: ${draft.allergens}');
     }
@@ -238,5 +233,29 @@ class ThermalPrintService {
         await _printViaBluetooth(resolved.address, bytes);
       }
     }
+  }
+
+  /// Etichetta da lotto merce in ingresso (foto prodotto arrivato).
+  Future<void> printLotLabel(
+    ProductLot lot, {
+    required String activityName,
+    String? operatorName,
+    int copies = 1,
+    DateTime? preparedAt,
+  }) async {
+    final now = preparedAt ?? DateTime.now();
+    final useBy = lot.effectiveExpiry ?? now.add(const Duration(days: 3));
+    await printLabel(
+      LabelDraft(
+        productName: lot.productName,
+        lotCode: lot.lotCode,
+        preparedAt: lot.openedAt ?? lot.receivedAt,
+        useBy: useBy,
+        allergens: lot.allergens,
+        operatorName: operatorName,
+        copies: copies,
+      ),
+      activityName: activityName,
+    );
   }
 }

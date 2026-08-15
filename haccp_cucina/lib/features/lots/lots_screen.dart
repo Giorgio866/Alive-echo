@@ -103,8 +103,15 @@ class LotsScreen extends ConsumerWidget {
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
                     ),
                     const SizedBox(height: 12),
-                    Row(
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
                       children: [
+                        FilledButton.tonalIcon(
+                          onPressed: () => _printLotLabel(context, ref, lot),
+                          icon: const Icon(Icons.print, size: 18),
+                          label: const Text('Stampa etichetta'),
+                        ),
                         if (!lot.opened)
                           TextButton.icon(
                             onPressed: () async {
@@ -115,7 +122,6 @@ class LotsScreen extends ConsumerWidget {
                             icon: const Icon(Icons.lock_open, size: 18),
                             label: const Text('Segna aperto'),
                           ),
-                        const Spacer(),
                         IconButton(
                           tooltip: 'Elimina',
                           onPressed: () async {
@@ -136,6 +142,23 @@ class LotsScreen extends ConsumerWidget {
         },
       ),
     );
+  }
+
+  Future<void> _printLotLabel(BuildContext context, WidgetRef ref, ProductLot lot) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final settings = await ref.read(settingsServiceProvider).load();
+    try {
+      await ref.read(thermalPrintServiceProvider).printLotLabel(
+            lot,
+            activityName: settings.activityName,
+            operatorName: settings.defaultOperator,
+          );
+      messenger.showSnackBar(
+        SnackBar(content: Text('Etichetta stampata · lotto ${lot.lotCode}')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   Future<void> _openLotForm(
@@ -170,6 +193,8 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
   DateTime? _expiry;
   bool _scanning = false;
   bool _alsoAddToCatalog = true;
+  bool _printAfterSave = true;
+  List<String> _extractedIngredients = [];
   String? _ocrNote;
 
   @override
@@ -217,12 +242,13 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
       if (result.supplier != null) _supplierCtrl.text = result.supplier!;
       if (result.allergens != null) _allergensCtrl.text = result.allergens!;
       if (result.expiryAt != null) _expiry = result.expiryAt;
+      _extractedIngredients = List.of(result.ingredients);
       if (result.storageHint != null &&
           RegExp(r'frigo|refriger', caseSensitive: false).hasMatch(result.storageHint!)) {
         _locationCtrl.text = 'Frigo';
       }
       if (!result.hasUsefulData) {
-        _ocrNote = 'Poco testo riconosciuto: controlla la foto o completa a mano.';
+        _ocrNote = 'Poco testo riconosciuto: avvicina l\'etichetta, luce buona, riprova.';
       } else {
         final bits = <String>[];
         if (result.productName != null) bits.add('prodotto');
@@ -230,6 +256,9 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
         if (result.expiryAt != null) bits.add('scadenza');
         if (result.supplier != null) bits.add('fornitore');
         if (result.allergens != null) bits.add('allergeni');
+        if (result.ingredients.isNotEmpty) {
+          bits.add('${result.ingredients.length} ingredienti');
+        }
         _ocrNote = 'Estratto: ${bits.join(', ')}. Controlla e salva.';
       }
     });
@@ -267,12 +296,51 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
               source: 'lot_scan',
             ),
           );
+      for (final ing in _extractedIngredients) {
+        await ref.read(haccpRepositoryProvider).upsertCustomIngredient(
+              IngredientCatalogItem(
+                id: 'ocr-ing-${ing.toLowerCase().hashCode}',
+                name: ing,
+                category: 'custom',
+                recommendedDays: 3,
+                storageHint: 'In frigo 0-4 °C',
+                source: 'lot_ingredients_ocr',
+              ),
+            );
+      }
       ref.invalidate(ingredientCatalogProvider);
     }
 
     ref.invalidate(lotsProvider);
     ref.invalidate(dashboardProvider);
-    if (mounted) Navigator.pop(context);
+
+    if (_printAfterSave && mounted) {
+      final settings = await ref.read(settingsServiceProvider).load();
+      try {
+        await ref.read(thermalPrintServiceProvider).printLotLabel(
+              lot,
+              activityName: settings.activityName,
+              operatorName: settings.defaultOperator,
+            );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lotto salvato. Stampa: $e')));
+        }
+      }
+    }
+
+    if (mounted) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _printAfterSave
+                ? 'Lotto ${lot.lotCode} salvato e inviato in stampa'
+                : 'Lotto ${lot.lotCode} salvato. Usa "Stampa etichetta" sulla scheda.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -355,14 +423,25 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Aggiungi anche al catalogo ingredienti'),
-              subtitle: const Text('Così poi puoi fare Preparo + etichetta'),
+              subtitle: Text(
+                _extractedIngredients.isEmpty
+                    ? 'Prodotto + eventuali ingredienti letti dall\'etichetta'
+                    : 'Inclusi ${_extractedIngredients.length} ingredienti OCR: ${_extractedIngredients.take(4).join(", ")}${_extractedIngredients.length > 4 ? "…" : ""}',
+              ),
               value: _alsoAddToCatalog,
               onChanged: (v) => setState(() => _alsoAddToCatalog = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Stampa etichetta subito dopo il salvataggio'),
+              subtitle: const Text('Con numero di lotto in evidenza'),
+              value: _printAfterSave,
+              onChanged: (v) => setState(() => _printAfterSave = v),
             ),
             const SizedBox(height: 8),
             FilledButton(
               onPressed: _scanning ? null : _save,
-              child: const Text('Salva lotto'),
+              child: Text(_printAfterSave ? 'Salva lotto e stampa' : 'Salva lotto'),
             ),
           ],
         ),

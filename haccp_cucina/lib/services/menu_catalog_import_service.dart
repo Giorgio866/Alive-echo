@@ -234,11 +234,10 @@ class MenuCatalogImportService {
     final seen = <String>{};
     final out = <MenuImportCandidate>[];
 
-    for (final raw in lines) {
-      final name = _extractDishName(raw);
-      if (name == null) continue;
+    void addName(String? name) {
+      if (name == null) return;
       final key = name.toLowerCase();
-      if (!seen.add(key)) continue;
+      if (!seen.add(key)) return;
       out.add(
         MenuImportCandidate(
           name: name,
@@ -246,9 +245,41 @@ class MenuCatalogImportService {
           category: guessCategory(name),
         ),
       );
+    }
+
+    // Estrai anche liste "Ingredienti: a, b, c" e "(pomodoro, mozzarella)"
+    for (final raw in lines) {
+      final paren = RegExp(r'\(([^)]{3,})\)').firstMatch(raw);
+      if (paren != null) {
+        for (final part in paren.group(1)!.split(RegExp(r'[,;/]| e | ed '))) {
+          addName(_extractDishName(part.trim()));
+        }
+      }
+      if (RegExp(r'^ingredienti\b', caseSensitive: false).hasMatch(raw)) {
+        final rest = raw.replaceFirst(RegExp(r'^ingredienti\s*[:\-]?\s*', caseSensitive: false), '');
+        for (final part in rest.split(RegExp(r'[,;/•·]| e | ed '))) {
+          addName(_extractDishName(part.trim()));
+        }
+        continue;
+      }
+      addName(_extractDishName(raw));
       if (out.length >= 120) break;
     }
-    return out;
+
+    // Blocco multilinea ingredienti nel testo intero
+    final block = RegExp(
+      r'ingredienti\s*[:\-]?\s*(.+?)(?=\n\s*[A-Z][A-Z ]{3,}|\n\s*allergen|$)',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(text);
+    if (block != null) {
+      final chunk = block.group(1)!.replaceAll(RegExp(r'[\r\n]+'), ',');
+      for (final part in chunk.split(RegExp(r'[,;/•·]'))) {
+        addName(_extractDishName(part.trim()));
+      }
+    }
+
+    return out.take(120).toList();
   }
 
   String _cleanLine(String line) {

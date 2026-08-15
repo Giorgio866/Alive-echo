@@ -23,10 +23,16 @@ Conservare in frigo 0-4 °C
     expect(r.hasUsefulData, isTrue);
   });
 
-  test('riconosce LOT e data con punti', () {
-    const text = 'Prosciutto cotto\nLOT XYZ789\nScad. 15.09.2026';
+  test('estrae ingredienti singoli dalla riga Ingredienti', () {
+    const text = '''
+Salsa pomodoro
+Lotto: SP99
+Ingredienti: pomodoro, basilico, olio EVO, aglio, sale
+Allergeni: nessuno
+Scadenza: 01/09/2026
+''';
     final r = service.parseLabelText(text);
-    expect(r.lotCode, 'XYZ789');
-    expect(r.expiryAt, DateTime(2026, 9, 15));
+    expect(r.ingredients.map((e) => e.toLowerCase()), containsAll(['pomodoro', 'basilico', 'aglio']));
+    expect(r.lotCode, 'SP99');
   });
 }

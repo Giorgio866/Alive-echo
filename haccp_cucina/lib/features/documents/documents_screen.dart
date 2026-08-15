@@ -15,10 +15,10 @@ class DocumentsScreen extends ConsumerWidget {
   const DocumentsScreen({super.key});
 
   static const _categories = {
-    'ddt': 'DDT / bolla',
+    'ddt': 'DDT / bolla di consegna',
     'certificato': 'Certificato / analisi',
     'formazione': 'Formazione staff',
-    'altro': 'Altro',
+    'altro': 'Altro documento',
   };
 
   @override
@@ -26,11 +26,11 @@ class DocumentsScreen extends ConsumerWidget {
     final docsAsync = ref.watch(documentsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Documenti scansionati')),
+      appBar: AppBar(title: const Text('Bolle e documenti')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _scanFlow(context, ref),
         icon: const Icon(Icons.document_scanner_outlined),
-        label: const Text('Scansiona'),
+        label: const Text('Scansiona bolla/DDT'),
       ),
       body: docsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -39,72 +39,94 @@ class DocumentsScreen extends ConsumerWidget {
           if (docs.isEmpty) {
             return EmptyState(
               icon: Icons.document_scanner_outlined,
-              title: 'Archivio vuoto',
-              message: 'Scansiona DDT, certificati fornitore e moduli formazione con la fotocamera.',
+              title: 'Nessuna bolla archiviata',
+              message:
+                  'Qui salvi solo la foto della bolla/DDT nel registro (archivio). '
+                  'Per creare lotti ed etichette usa invece Lotti → Scansiona lotto.',
               cta: FilledButton.icon(
                 onPressed: () => _scanFlow(context, ref),
                 icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Avvia scansione'),
+                label: const Text('Scansiona e archivia bolla'),
               ),
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              return InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: () => _preview(context, doc),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppColors.slate.withValues(alpha: 0.08)),
+          return Column(
+            children: [
+              Material(
+                color: AppColors.amberSoft.withValues(alpha: 0.7),
+                child: const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 10, 16, 10),
+                  child: Text(
+                    'Questa sezione archivia le foto (bolle/DDT). '
+                    'Non crea lotti automatici: per prodotto + etichetta vai in Lotti.',
                   ),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: SizedBox(
-                          width: 64,
-                          height: 64,
-                          child: _thumb(doc.filePath),
+                ),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                  itemCount: docs.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final doc = docs[index];
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => _preview(context, doc),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceElevated,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.slate.withValues(alpha: 0.08)),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Row(
                           children: [
-                            Text(doc.title, style: Theme.of(context).textTheme.titleMedium),
-                            Text(
-                              '${_categories[doc.category] ?? doc.category}'
-                              ' · ${DateFormat('dd/MM/yyyy HH:mm').format(doc.scannedAt)}',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: AppColors.slateMuted,
-                                  ),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: SizedBox(
+                                width: 64,
+                                height: 64,
+                                child: _thumb(doc.filePath),
+                              ),
                             ),
-                            if (doc.supplier != null && doc.supplier!.isNotEmpty)
-                              Text('Fornitore: ${doc.supplier}'),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(doc.title, style: Theme.of(context).textTheme.titleMedium),
+                                  Text(
+                                    '${_categories[doc.category] ?? doc.category}'
+                                    ' · ${DateFormat('dd/MM/yyyy HH:mm').format(doc.scannedAt)}',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: AppColors.slateMuted,
+                                        ),
+                                  ),
+                                  const Text(
+                                    'Stato: salvata nell\'archivio documenti',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  if (doc.supplier != null && doc.supplier!.isNotEmpty)
+                                    Text('Fornitore: ${doc.supplier}'),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () async {
+                                await ref.read(haccpRepositoryProvider).deleteDocument(doc.id);
+                                ref.invalidate(documentsProvider);
+                                ref.invalidate(dashboardProvider);
+                              },
+                              icon: const Icon(Icons.delete_outline),
+                            ),
                           ],
                         ),
                       ),
-                      IconButton(
-                        onPressed: () async {
-                          await ref.read(haccpRepositoryProvider).deleteDocument(doc.id);
-                          ref.invalidate(documentsProvider);
-                          ref.invalidate(dashboardProvider);
-                        },
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              );
-            },
+              ),
+            ],
           );
         },
       ),
@@ -149,6 +171,13 @@ class DocumentsScreen extends ConsumerWidget {
                 padding: EdgeInsets.all(24),
                 child: Text('Anteprima non disponibile su questa piattaforma.'),
               ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Documento solo archiviato. Per etichette/lotti apri la sezione Lotti.',
+                textAlign: TextAlign.center,
+              ),
+            ),
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Chiudi')),
           ],
         ),
@@ -164,10 +193,16 @@ class DocumentsScreen extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const ListTile(
+              title: Text('Cosa fa questa scansione?'),
+              subtitle: Text(
+                'Salva la foto della bolla/DDT nell\'archivio documenti. '
+                'Non stampa etichette e non crea lotti.',
+              ),
+            ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Scatta con fotocamera'),
-              subtitle: const Text('Ideale per DDT e bolle consegna'),
+              title: const Text('Scatta bolla / DDT'),
               onTap: () => Navigator.pop(ctx, 'camera'),
             ),
             ListTile(
@@ -185,7 +220,9 @@ class DocumentsScreen extends ConsumerWidget {
     final path = source == 'camera' ? await scanner.captureFromCamera() : await scanner.pickFromGallery();
     if (path == null || !context.mounted) return;
 
-    final titleCtrl = TextEditingController();
+    final titleCtrl = TextEditingController(
+      text: 'Bolla ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}',
+    );
     final supplierCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     var category = 'ddt';
@@ -208,7 +245,12 @@ class DocumentsScreen extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Dettagli documento', style: Theme.of(ctx).textTheme.headlineSmall),
+                  Text('Archivia bolla / documento', style: Theme.of(ctx).textTheme.headlineSmall),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Conferma = salva la foto nel registro. Poi puoi ritrovarla qui.',
+                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+                  ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: titleCtrl,
@@ -240,7 +282,7 @@ class DocumentsScreen extends ConsumerWidget {
                   FilledButton(
                     onPressed: () async {
                       final title = titleCtrl.text.trim().isEmpty
-                          ? 'Documento ${DateFormat('dd/MM HH:mm').format(DateTime.now())}'
+                          ? 'Bolla ${DateFormat('dd/MM HH:mm').format(DateTime.now())}'
                           : titleCtrl.text.trim();
                       await ref.read(haccpRepositoryProvider).addDocument(
                             DocumentRecord(
@@ -259,11 +301,17 @@ class DocumentsScreen extends ConsumerWidget {
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Documento archiviato')),
+                          const SnackBar(
+                            content: Text(
+                              'Bolla salvata nell\'archivio documenti. '
+                              'Per etichetta/lotto: apri Lotti → Scansiona lotto.',
+                            ),
+                            duration: Duration(seconds: 4),
+                          ),
                         );
                       }
                     },
-                    child: const Text('Salva nel registro'),
+                    child: const Text('Salva nell\'archivio (solo foto)'),
                   ),
                 ],
               ),

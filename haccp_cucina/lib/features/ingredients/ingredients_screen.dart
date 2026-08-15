@@ -160,9 +160,18 @@ class _ActiveBatchesTab extends ConsumerWidget {
                               useBy: b.expiresAt,
                               allergens: item?.allergens,
                               operatorName: b.operatorName,
-                              storageHint: item?.storageHint ?? 'In frigo 0–4 °C',
                               copies: 1,
                             );
+                            if ((b.lotCode ?? '').trim().isEmpty) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Questo preparato non ha lotto: rifai Preparo scegliendo un lotto'),
+                                  ),
+                                );
+                              }
+                              return;
+                            }
                             try {
                               await ref.read(thermalPrintServiceProvider).printLabel(
                                     draft,
@@ -456,9 +465,91 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                         trailing: FilledButton.tonal(
                           onPressed: () async {
                             final op = settings.value?.defaultOperator ?? 'Operatore';
+                            final lots = await ref.read(haccpRepositoryProvider).getLots();
+                            String? lotCode;
+                            if (context.mounted && lots.isNotEmpty) {
+                              lotCode = await showModalBottomSheet<String>(
+                                context: context,
+                                showDragHandle: true,
+                                builder: (ctx) => SafeArea(
+                                  child: ListView(
+                                    children: [
+                                      const ListTile(
+                                        title: Text('Scegli il lotto per l\'etichetta'),
+                                        subtitle: Text('Obbligatorio per stampare il numero di lotto'),
+                                      ),
+                                      ...lots.map(
+                                        (l) => ListTile(
+                                          title: Text(l.productName),
+                                          subtitle: Text('Lotto ${l.lotCode}'),
+                                          onTap: () => Navigator.pop(ctx, l.lotCode),
+                                        ),
+                                      ),
+                                      ListTile(
+                                        leading: const Icon(Icons.edit),
+                                        title: const Text('Scrivi lotto a mano'),
+                                        onTap: () => Navigator.pop(ctx, '__manual__'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                              if (lotCode == '__manual__' && context.mounted) {
+                                final ctrl = TextEditingController();
+                                lotCode = await showDialog<String>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Numero di lotto'),
+                                    content: TextField(
+                                      controller: ctrl,
+                                      decoration: const InputDecoration(labelText: 'Lotto'),
+                                      autofocus: true,
+                                    ),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annulla')),
+                                      FilledButton(
+                                        onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                                        child: const Text('OK'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            } else if (context.mounted) {
+                              final ctrl = TextEditingController();
+                              lotCode = await showDialog<String>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('Numero di lotto'),
+                                  content: TextField(
+                                    controller: ctrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Lotto (obbligatorio sull\'etichetta)',
+                                    ),
+                                    autofocus: true,
+                                  ),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annulla')),
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                                      child: const Text('OK'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                            if (lotCode == null || lotCode.isEmpty) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Serve il numero di lotto per continuare')),
+                                );
+                              }
+                              return;
+                            }
                             final batch = await ref.read(haccpRepositoryProvider).registerPreparedBatch(
                                   ingredient: item,
                                   operatorName: op,
+                                  lotCode: lotCode,
                                 );
                             await ref.read(expiryNotificationServiceProvider).scheduleBatchExpiry(batch);
                             ref.invalidate(preparedBatchesProvider);
@@ -467,7 +558,7 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    '${item.name}: scadenza ${DateFormat('dd/MM').format(batch.expiresAt)} · notifica attiva',
+                                    '${item.name} · lotto $lotCode · scad. ${DateFormat('dd/MM').format(batch.expiresAt)}',
                                   ),
                                 ),
                               );
