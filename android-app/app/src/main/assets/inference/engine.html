@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeCompanion Inference</title>
+  <style>
+    html, body { margin: 0; padding: 8px; background: #0f1419; color: #c9d1d9; font-family: sans-serif; font-size: 12px; }
+    #status { font-weight: 600; margin-bottom: 8px; }
+    #log { white-space: pre-wrap; opacity: 0.65; max-height: 120px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div id="status">Motore AI in avvio…</div>
+  <div id="log"></div>
+  <script type="module">
+    import { Wllama } from "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.1/esm/index.js";
+
+    const CONFIG_PATHS = {
+      "single-thread/wllama.wasm": "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.1/esm/single-thread/wllama.wasm",
+      "multi-thread/wllama.wasm": "https://cdn.jsdelivr.net/npm/@wllama/wllama@2.3.1/esm/multi-thread/wllama.wasm",
+    };
+
+    const statusEl = document.getElementById("status");
+    const logEl = document.getElementById("log");
+    let wllama = null;
+    let engineReady = false;
+    let loadedModel = null;
+
+    function bridge(fn, ...args) {
+      try {
+        if (window.AndroidBridge && typeof window.AndroidBridge[fn] === "function") {
+          window.AndroidBridge[fn](...args.map(String));
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+      bridge("onStatus", msg);
+    }
+
+    function log(msg) {
+      logEl.textContent += msg + "\n";
+      bridge("onLog", msg);
+    }
+
+    async function init() {
+      try {
+        wllama = new Wllama(CONFIG_PATHS);
+        engineReady = true;
+        setStatus("Motore pronto. Scegli un modello.");
+        bridge("onEngineReady");
+      } catch (e) {
+        setStatus("Errore motore: " + e);
+        bridge("onError", String(e));
+      }
+    }
+
+    window.loadModel = async function (repo, file) {
+      if (!wllama) throw new Error("Motore non pronto");
+      setStatus("Download modello da Hugging Face…");
+      log("HF: " + repo + " / " + file);
+      await wllama.loadModelFromHF(repo, file, {
+        n_ctx: 2048,
+        n_threads: 1,
+        progressCallback: ({ loaded, total }) => {
+          if (!total) return;
+          const pct = Math.round((loaded / total) * 100);
+          setStatus("Download modello: " + pct + "%");
+        },
+      });
+      loadedModel = repo + "/" + file;
+      setStatus("Modello caricato");
+      bridge("onModelLoaded", loadedModel);
+      return loadedModel;
+    };
+
+    window.chat = async function (prompt, maxTokens) {
+      if (!wllama || !loadedModel) throw new Error("Nessun modello caricato");
+      setStatus("Generazione…");
+      const text = await wllama.createCompletion(String(prompt), {
+        nPredict: Number(maxTokens) || 256,
+        sampling: { temp: 0.2, top_k: 40, top_p: 0.9 },
+        onNewToken: (_token, _piece, currentText) => {
+          bridge("onToken", currentText);
+        },
+      });
+      setStatus("Pronto");
+      bridge("onComplete", text);
+      return text;
+    };
+
+    window.getState = function () {
+      return JSON.stringify({ engineReady, loadedModel });
+    };
+
+    init();
+  </script>
+</body>
+</html>
