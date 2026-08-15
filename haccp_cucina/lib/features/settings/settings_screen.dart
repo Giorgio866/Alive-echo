@@ -16,9 +16,15 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _activityCtrl = TextEditingController();
   final _operatorCtrl = TextEditingController();
+  final _hostCtrl = TextEditingController(text: '192.168.1.130');
+  final _portCtrl = TextEditingController(text: '9100');
+  final _networkNameCtrl = TextEditingController(text: 'ESC/POS rete');
+
   List<ThermalPrinterDevice> _devices = [];
   bool _loadingDevices = false;
-  String? _connectedLabel;
+  bool _testingNetwork = false;
+  String? _printerSummary;
+  String _mode = 'network'; // bluetooth | network
 
   @override
   void initState() {
@@ -30,20 +36,99 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final s = await ref.read(settingsServiceProvider).load();
     _activityCtrl.text = s.activityName;
     _operatorCtrl.text = s.defaultOperator;
-    final printer = ref.read(thermalPrintServiceProvider);
-    final connected = await printer.isConnected;
+    if (s.printerMode == 'bluetooth' || s.printerMode == 'network') {
+      _mode = s.printerMode!;
+    }
+    if (s.printerMode == 'network' && s.printerAddress != null) {
+      _hostCtrl.text = s.printerAddress!;
+      _portCtrl.text = '${s.printerPort ?? 9100}';
+      if (s.printerName != null) _networkNameCtrl.text = s.printerName!;
+    }
     setState(() {
-      _connectedLabel = connected
-          ? (s.printerName ?? s.printerAddress ?? 'Connessa')
-          : s.printerName;
+      _printerSummary = s.hasPrinterConfigured
+          ? _describe(s)
+          : null;
     });
+  }
+
+  String _describe(AppSettings s) {
+    if (s.printerMode == 'network') {
+      final name = s.printerName ?? 'Rete';
+      return '$name · ${s.printerAddress}:${s.printerPort ?? 9100}';
+    }
+    return '${s.printerName ?? 'Bluetooth'} · ${s.printerAddress}';
   }
 
   @override
   void dispose() {
     _activityCtrl.dispose();
     _operatorCtrl.dispose();
+    _hostCtrl.dispose();
+    _portCtrl.dispose();
+    _networkNameCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _clearPrinter() async {
+    final printer = ref.read(thermalPrintServiceProvider);
+    await printer.disconnectBluetooth();
+    final current = await ref.read(settingsServiceProvider).load();
+    await ref.read(settingsServiceProvider).save(current.copyWith(clearPrinter: true));
+    ref.invalidate(settingsProvider);
+    setState(() {
+      _printerSummary = null;
+      _devices = [];
+    });
+  }
+
+  Future<void> _saveNetworkPrinter({bool testFirst = false}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final host = _hostCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim()) ?? 9100;
+    if (host.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('Inserisci IP o hostname')));
+      return;
+    }
+    if (port < 1 || port > 65535) {
+      messenger.showSnackBar(const SnackBar(content: Text('Porta non valida')));
+      return;
+    }
+
+    setState(() => _testingNetwork = true);
+    try {
+      if (testFirst) {
+        await ref.read(thermalPrintServiceProvider).testNetworkPrinter(host, port);
+      }
+      final current = await ref.read(settingsServiceProvider).load();
+      final name = _networkNameCtrl.text.trim().isEmpty ? 'ESC/POS $host' : _networkNameCtrl.text.trim();
+      final updated = current.copyWith(
+        printerMode: 'network',
+        printerAddress: host,
+        printerPort: port,
+        printerName: name,
+      );
+      await ref.read(settingsServiceProvider).save(updated);
+      ref.invalidate(settingsProvider);
+      setState(() {
+        _mode = 'network';
+        _printerSummary = _describe(updated);
+      });
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            testFirst
+                ? 'Stampante di rete OK e salvata ($host:$port)'
+                : 'Stampante di rete salvata ($host:$port)',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _testingNetwork = false);
+    }
   }
 
   @override
@@ -91,97 +176,190 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SnackBar(content: Text('Impostazioni salvate')),
               );
             },
-            child: const Text('Salva'),
+            child: const Text('Salva attività'),
           ),
           const SizedBox(height: 28),
-          Text('Stampante termica Bluetooth', style: Theme.of(context).textTheme.titleLarge),
+          Text('Stampante etichette', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 6),
           Text(
-            printer.isSupported
-                ? 'Associa una stampante ESC/POS già accoppiata nelle impostazioni Bluetooth di Android.'
-                : 'Disponibile sull\'app Android. Su questa piattaforma puoi solo configurare i dati attività.',
+            'Scegli Bluetooth oppure WiFi/rete ESC/POS (IP + porta, anche tramite bridge Android).',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
           ),
           const SizedBox(height: 12),
-          if (_connectedLabel != null)
+          if (_printerSummary != null)
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.print, color: AppColors.teal),
-              title: Text(_connectedLabel!),
-              subtitle: const Text('Stampante memorizzata / connessa'),
+              leading: Icon(
+                _mode == 'network' ? Icons.wifi : Icons.bluetooth,
+                color: AppColors.teal,
+              ),
+              title: Text(_printerSummary!),
+              subtitle: Text(_mode == 'network' ? 'WiFi / LAN / bridge' : 'Bluetooth'),
               trailing: IconButton(
+                tooltip: 'Rimuovi stampante',
                 icon: const Icon(Icons.link_off),
-                onPressed: () async {
-                  await printer.disconnect();
-                  final current = await ref.read(settingsServiceProvider).load();
-                  await ref.read(settingsServiceProvider).save(
-                        AppSettings(
-                          activityName: current.activityName,
-                          defaultOperator: current.defaultOperator,
-                          onboardingCompleted: current.onboardingCompleted,
-                        ),
-                      );
-                  ref.invalidate(settingsProvider);
-                  setState(() => _connectedLabel = null);
+                onPressed: _clearPrinter,
+              ),
+            ),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(
+                value: 'network',
+                label: Text('WiFi / rete'),
+                icon: Icon(Icons.wifi),
+              ),
+              ButtonSegment(
+                value: 'bluetooth',
+                label: Text('Bluetooth'),
+                icon: Icon(Icons.bluetooth),
+              ),
+            ],
+            selected: {_mode},
+            onSelectionChanged: (v) => setState(() => _mode = v.first),
+          ),
+          const SizedBox(height: 16),
+          if (_mode == 'network') ...[
+            TextField(
+              controller: _networkNameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nome (opzionale)',
+                hintText: 'Es. Stampante cucina / Bridge',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _hostCtrl,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: 'IP o hostname',
+                hintText: '192.168.1.130',
+                helperText: 'Es. stampante WiFi o telefono-bridge in LAN',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _portCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Porta',
+                hintText: '9100',
+                helperText: 'Di solito 9100 (raw ESC/POS)',
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _testingNetwork ? null : () => _saveNetworkPrinter(testFirst: true),
+                    icon: _testingNetwork
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.network_check),
+                    label: const Text('Test e salva'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _testingNetwork ? null : () => _saveNetworkPrinter(testFirst: false),
+                    icon: const Icon(Icons.save_outlined),
+                    label: const Text('Salva'),
+                  ),
+                ),
+              ],
+            ),
+          ] else ...[
+            Text(
+              printer.isSupported
+                  ? 'Usa una stampante ESC/POS già accoppiata in Impostazioni Bluetooth Android.'
+                  : 'Bluetooth disponibile sull\'app Android.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: !printer.isSupported
+                  ? null
+                  : () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      setState(() => _loadingDevices = true);
+                      try {
+                        final devices = await printer.bondedDevices();
+                        setState(() => _devices = devices);
+                        if (devices.isEmpty && mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Nessuna stampante accoppiata. Accoppiala prima in Bluetooth Android.'),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (!mounted) return;
+                        messenger.showSnackBar(SnackBar(content: Text('$e')));
+                      } finally {
+                        if (mounted) setState(() => _loadingDevices = false);
+                      }
+                    },
+              icon: _loadingDevices
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.bluetooth_searching),
+              label: const Text('Cerca stampanti accoppiate'),
+            ),
+            const SizedBox(height: 8),
+            ..._devices.map(
+              (d) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.bluetooth),
+                title: Text(d.name),
+                subtitle: Text(d.address),
+                onTap: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  try {
+                    await printer.connectBluetooth(d);
+                    final current = await ref.read(settingsServiceProvider).load();
+                    final updated = current.copyWith(
+                      printerMode: 'bluetooth',
+                      printerName: d.name,
+                      printerAddress: d.address,
+                      printerPort: null,
+                    );
+                    // clear port explicitly
+                    await ref.read(settingsServiceProvider).save(
+                          AppSettings(
+                            activityName: updated.activityName,
+                            defaultOperator: updated.defaultOperator,
+                            onboardingCompleted: updated.onboardingCompleted,
+                            printerMode: 'bluetooth',
+                            printerName: d.name,
+                            printerAddress: d.address,
+                            printerPort: null,
+                          ),
+                        );
+                    ref.invalidate(settingsProvider);
+                    setState(() {
+                      _mode = 'bluetooth';
+                      _printerSummary = '${d.name} · ${d.address}';
+                    });
+                    if (!mounted) return;
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('Connessa a ${d.name}')),
+                    );
+                  } catch (e) {
+                    if (!mounted) return;
+                    messenger.showSnackBar(SnackBar(content: Text('$e')));
+                  }
                 },
               ),
             ),
-          OutlinedButton.icon(
-            onPressed: !printer.isSupported
-                ? null
-                : () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    setState(() => _loadingDevices = true);
-                    try {
-                      final devices = await printer.bondedDevices();
-                      setState(() => _devices = devices);
-                    } catch (e) {
-                      if (!mounted) return;
-                      messenger.showSnackBar(SnackBar(content: Text('$e')));
-                    } finally {
-                      if (mounted) setState(() => _loadingDevices = false);
-                    }
-                  },
-            icon: _loadingDevices
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.bluetooth_searching),
-            label: const Text('Cerca stampanti accoppiate'),
-          ),
-          const SizedBox(height: 8),
-          ..._devices.map(
-            (d) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.bluetooth),
-              title: Text(d.name),
-              subtitle: Text(d.address),
-              onTap: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                try {
-                  await printer.connect(d);
-                  final current = await ref.read(settingsServiceProvider).load();
-                  await ref.read(settingsServiceProvider).save(
-                        current.copyWith(
-                          printerName: d.name,
-                          printerAddress: d.address,
-                        ),
-                      );
-                  ref.invalidate(settingsProvider);
-                  setState(() => _connectedLabel = d.name);
-                  if (!mounted) return;
-                  messenger.showSnackBar(
-                    SnackBar(content: Text('Connessa a ${d.name}')),
-                  );
-                } catch (e) {
-                  if (!mounted) return;
-                  messenger.showSnackBar(SnackBar(content: Text('$e')));
-                }
-              },
-            ),
-          ),
+          ],
           const SizedBox(height: 28),
           Text('Informazioni', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),

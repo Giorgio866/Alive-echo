@@ -191,8 +191,13 @@ class _LabelsScreenState extends ConsumerState<LabelsScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Text(
-                'La stampa Bluetooth ESC/POS è attiva su Android. Qui puoi comunque preparare e verificare il layout.',
+                'La stampa ESC/POS è attiva su Android (Bluetooth o WiFi/rete). Qui puoi comunque preparare il layout.',
               ),
+            )
+          else
+            Text(
+              'Usa la stampante salvata in Impostazioni (Bluetooth oppure WiFi IP:porta / bridge).',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
             ),
           const SizedBox(height: 12),
           FilledButton.icon(

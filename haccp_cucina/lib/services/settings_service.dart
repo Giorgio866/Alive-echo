@@ -8,8 +8,10 @@ class SettingsService {
     return AppSettings.fromPrefs({
       'activity_name': prefs.getString('activity_name'),
       'default_operator': prefs.getString('default_operator'),
+      'printer_mode': prefs.getString('printer_mode'),
       'printer_address': prefs.getString('printer_address'),
       'printer_name': prefs.getString('printer_name'),
+      'printer_port': prefs.getString('printer_port'),
       'onboarding_completed': prefs.getString('onboarding_completed'),
     });
   }
@@ -22,6 +24,12 @@ class SettingsService {
       'onboarding_completed',
       settings.onboardingCompleted ? '1' : '0',
     );
+
+    if (settings.printerMode != null) {
+      await prefs.setString('printer_mode', settings.printerMode!);
+    } else {
+      await prefs.remove('printer_mode');
+    }
     if (settings.printerAddress != null) {
       await prefs.setString('printer_address', settings.printerAddress!);
     } else {
@@ -31,6 +39,11 @@ class SettingsService {
       await prefs.setString('printer_name', settings.printerName!);
     } else {
       await prefs.remove('printer_name');
+    }
+    if (settings.printerPort != null) {
+      await prefs.setString('printer_port', settings.printerPort!.toString());
+    } else {
+      await prefs.remove('printer_port');
     }
   }
 

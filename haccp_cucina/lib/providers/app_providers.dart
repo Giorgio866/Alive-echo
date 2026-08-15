@@ -24,7 +24,7 @@ final documentScanServiceProvider = Provider<DocumentScanService>((ref) {
 });
 
 final thermalPrintServiceProvider = Provider<ThermalPrintService>((ref) {
-  return ThermalPrintService();
+  return ThermalPrintService(settings: ref.watch(settingsServiceProvider));
 });
 
 final settingsServiceProvider = Provider<SettingsService>((ref) {

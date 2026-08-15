@@ -67,46 +67,76 @@ class LabelDraft {
 class AppSettings {
   final String activityName;
   final String defaultOperator;
+  /// `bluetooth` | `network` | null
+  final String? printerMode;
+  /// MAC Bluetooth oppure host/IP di rete.
   final String? printerAddress;
   final String? printerName;
+  /// Porta TCP per stampanti di rete / bridge (default 9100).
+  final int? printerPort;
   final bool onboardingCompleted;
 
   const AppSettings({
     required this.activityName,
     required this.defaultOperator,
+    this.printerMode,
     this.printerAddress,
     this.printerName,
+    this.printerPort,
     this.onboardingCompleted = false,
   });
+
+  bool get hasPrinterConfigured =>
+      printerAddress != null &&
+      printerAddress!.trim().isNotEmpty &&
+      (printerMode == 'bluetooth' || printerMode == 'network');
 
   AppSettings copyWith({
     String? activityName,
     String? defaultOperator,
+    String? printerMode,
     String? printerAddress,
     String? printerName,
+    int? printerPort,
     bool? onboardingCompleted,
+    bool clearPrinter = false,
   }) =>
       AppSettings(
         activityName: activityName ?? this.activityName,
         defaultOperator: defaultOperator ?? this.defaultOperator,
-        printerAddress: printerAddress ?? this.printerAddress,
-        printerName: printerName ?? this.printerName,
+        printerMode: clearPrinter ? null : (printerMode ?? this.printerMode),
+        printerAddress: clearPrinter ? null : (printerAddress ?? this.printerAddress),
+        printerName: clearPrinter ? null : (printerName ?? this.printerName),
+        printerPort: clearPrinter ? null : (printerPort ?? this.printerPort),
         onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
       );
 
   Map<String, String?> toPrefs() => {
         'activity_name': activityName,
         'default_operator': defaultOperator,
+        'printer_mode': printerMode,
         'printer_address': printerAddress,
         'printer_name': printerName,
+        'printer_port': printerPort?.toString(),
         'onboarding_completed': onboardingCompleted ? '1' : '0',
       };
 
-  factory AppSettings.fromPrefs(Map<String, String?> prefs) => AppSettings(
-        activityName: prefs['activity_name'] ?? 'Blue Eyes Pizzeria',
-        defaultOperator: prefs['default_operator'] ?? 'Operatore',
-        printerAddress: prefs['printer_address'],
-        printerName: prefs['printer_name'],
-        onboardingCompleted: prefs['onboarding_completed'] == '1',
-      );
+  factory AppSettings.fromPrefs(Map<String, String?> prefs) {
+    final portRaw = prefs['printer_port'];
+    final port = portRaw == null ? null : int.tryParse(portRaw);
+    // Retrocompatibilità: se c'era solo address (MAC), assume Bluetooth.
+    final mode = prefs['printer_mode'] ??
+        (prefs['printer_address'] != null && prefs['printer_address']!.isNotEmpty
+            ? 'bluetooth'
+            : null);
+    return AppSettings(
+      activityName: prefs['activity_name'] ?? 'Pizzeria / Cucina',
+      defaultOperator: prefs['default_operator'] ?? 'Operatore',
+      printerMode: mode,
+      printerAddress: prefs['printer_address'],
+      printerName: prefs['printer_name'],
+      printerPort: port,
+      onboardingCompleted: prefs['onboarding_completed'] == '1',
+    );
+  }
 }
