@@ -420,6 +420,23 @@ class _LotFormSheetState extends ConsumerState<_LotFormSheet> {
                     : 'Scadenza ${DateFormat('dd/MM/yyyy').format(_expiry!)}',
               ),
             ),
+            if (_extractedIngredients.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Ingredienti letti', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final ing in List<String>.from(_extractedIngredients))
+                    Chip(
+                      label: Text(ing, style: const TextStyle(fontSize: 12)),
+                      visualDensity: VisualDensity.compact,
+                      onDeleted: () => setState(() => _extractedIngredients.remove(ing)),
+                    ),
+                ],
+              ),
+            ],
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Aggiungi anche al catalogo ingredienti'),

@@ -411,13 +411,12 @@ class LotLabelOcrService {
     ];
     final found = <String>[];
     for (final a in known) {
-      final re = RegExp(r'(?<!senza\s)(?<!senza\s.{0,30})\b' + a + r'\b', caseSensitive: false);
-      // Approccio più semplice: cerca "contiene ..." oppure parola non in contesto "senza"
+      // Non segnare allergeni se compaiono solo in claim "SENZA ..."
       if (RegExp('senza[\\s\\w]{0,40}$a', caseSensitive: false).hasMatch(lower)) {
         continue;
       }
-      if (RegExp(r'contiene[\\s\\w,:/]{0,40}' + a, caseSensitive: false).hasMatch(lower) ||
-          RegExp(r'allergeni[\\s\\w,:/]{0,40}' + a, caseSensitive: false).hasMatch(lower)) {
+      if (RegExp(r'contiene[\s\w,:/]{0,40}' + a, caseSensitive: false).hasMatch(lower) ||
+          RegExp(r'allergeni[\s\w,:/]{0,40}' + a, caseSensitive: false).hasMatch(lower)) {
         found.add(_title(a));
       }
     }
