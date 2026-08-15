@@ -53,6 +53,13 @@ class MainActivity : ComponentActivity() {
                         onAutoFixChange = viewModel::setAutoFixOnError,
                         onCheckServer = viewModel::checkServer,
                         onCompileNow = viewModel::compileNow,
+                        onHfQueryChange = viewModel::updateHfQuery,
+                        onHfTokenChange = viewModel::updateHfToken,
+                        onSearchHf = viewModel::searchHuggingFace,
+                        onPickHfRepo = viewModel::pickHfRepo,
+                        onAddCustom = viewModel::addCustomGguf,
+                        onImagePromptChange = viewModel::updateImagePrompt,
+                        onGenerateImage = viewModel::generateImage,
                     )
                     HiddenWebEngines(viewModel)
                 }
@@ -76,6 +83,16 @@ private fun HiddenWebEngines(viewModel: AppViewModel) {
     AndroidView(
         factory = { context ->
             viewModel.localRuntime.attachWebView(context).also { webView ->
+                (webView.parent as? ViewGroup)?.removeView(webView)
+                webView.layoutParams = ViewGroup.LayoutParams(1, 1)
+                webView.alpha = 0f
+            }
+        },
+        modifier = Modifier.size(1.dp),
+    )
+    AndroidView(
+        factory = { context ->
+            viewModel.imageEngine.attachWebView(context).also { webView ->
                 (webView.parent as? ViewGroup)?.removeView(webView)
                 webView.layoutParams = ViewGroup.LayoutParams(1, 1)
                 webView.alpha = 0f

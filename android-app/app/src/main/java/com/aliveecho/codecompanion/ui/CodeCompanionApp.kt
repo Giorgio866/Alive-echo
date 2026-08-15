@@ -1,5 +1,6 @@
 package com.aliveecho.codecompanion.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -60,11 +62,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.BitmapFactory
 import com.aliveecho.codecompanion.AppUiState
 import com.aliveecho.codecompanion.ChatMessage
 import com.aliveecho.codecompanion.CompileMode
 import com.aliveecho.codecompanion.HfModel
 import com.aliveecho.codecompanion.ModelCatalog
+import com.aliveecho.codecompanion.ModelKind
+import com.aliveecho.codecompanion.data.HfSearchHit
 
 private val Ink = Color(0xFF101820)
 private val Paper = Color(0xFFF4EFE6)
@@ -91,6 +98,13 @@ fun CodeCompanionApp(
     onAutoFixChange: (Boolean) -> Unit,
     onCheckServer: () -> Unit,
     onCompileNow: () -> Unit,
+    onHfQueryChange: (String) -> Unit,
+    onHfTokenChange: (String) -> Unit,
+    onSearchHf: () -> Unit,
+    onPickHfRepo: (HfSearchHit) -> Unit,
+    onAddCustom: (String, String) -> Unit,
+    onImagePromptChange: (String) -> Unit,
+    onGenerateImage: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
 
@@ -106,6 +120,7 @@ fun CodeCompanionApp(
                             color = Ink,
                         )
                         val compileHint = when {
+                            state.generatingImage -> "Immagine…"
                             state.compiling -> "Compilazione…"
                             state.lastCompile?.ok == true -> "Build OK"
                             state.lastCompile?.ok == false -> "Build errore"
@@ -145,6 +160,12 @@ fun CodeCompanionApp(
                 NavigationBarItem(
                     selected = tab == 3,
                     onClick = { tab = 3 },
+                    icon = { Icon(Icons.Default.Image, contentDescription = null) },
+                    label = { Text("Immagini") },
+                )
+                NavigationBarItem(
+                    selected = tab == 4,
+                    onClick = { tab = 4 },
                     icon = { Icon(Icons.Default.Memory, contentDescription = null) },
                     label = { Text("Modelli") },
                 )
@@ -187,7 +208,22 @@ fun CodeCompanionApp(
                     onCheckServer = onCheckServer,
                     onCompileNow = onCompileNow,
                 )
-                else -> ModelsScreen(state, onDownload, onLoad)
+                3 -> ImageScreen(
+                    state = state,
+                    onPromptChange = onImagePromptChange,
+                    onGenerate = onGenerateImage,
+                    onGoModels = { tab = 4 },
+                )
+                else -> ModelsScreen(
+                    state = state,
+                    onDownload = onDownload,
+                    onLoad = onLoad,
+                    onHfQueryChange = onHfQueryChange,
+                    onHfTokenChange = onHfTokenChange,
+                    onSearchHf = onSearchHf,
+                    onPickHfRepo = onPickHfRepo,
+                    onAddCustom = onAddCustom,
+                )
             }
         }
     }
@@ -565,10 +601,103 @@ private fun MessageBubble(message: ChatMessage) {
 }
 
 @Composable
+private fun ImageScreen(
+    state: AppUiState,
+    onPromptChange: (String) -> Unit,
+    onGenerate: () -> Unit,
+    onGoModels: () -> Unit,
+) {
+    val bitmap = remember(state.lastImagePath) {
+        state.lastImagePath?.let { BitmapFactory.decodeFile(it)?.asImageBitmap() }
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        Text(
+            "Immagini uncensored",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = Ink,
+        )
+        Text(
+            "Scarica un modello immagini da Hugging Face, poi genera qui. Nessun filtro extra nell'app.",
+            color = Smoke,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (state.imageEngineReady) state.imageStatus else "Motore immagini in avvio…",
+            color = if (state.imageEngineReady) Moss else Smoke,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            state.loadedImageModel ?: "Nessun modello immagini caricato",
+            color = Smoke,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        Spacer(Modifier.height(12.dp))
+        BasicTextField(
+            value = state.imagePrompt,
+            onValueChange = onPromptChange,
+            textStyle = TextStyle(color = Ink, fontSize = 16.sp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 90.dp)
+                .background(Sand, RoundedCornerShape(12.dp))
+                .padding(14.dp),
+            decorationBox = { inner ->
+                if (state.imagePrompt.isEmpty()) {
+                    Text("Prompt, es. a portrait of an adult woman, photorealistic…", color = Smoke)
+                }
+                inner()
+            },
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onGenerate,
+                enabled = !state.generatingImage && !state.busy && state.loadedImageModel != null,
+                colors = ButtonDefaults.buttonColors(containerColor = Moss),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(if (state.generatingImage) "Genero…" else "Genera")
+            }
+            OutlinedButton(onClick = onGoModels, modifier = Modifier.weight(1f)) {
+                Text("Scegli modello")
+            }
+        }
+        if (state.generatingImage) {
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Moss)
+        }
+        Spacer(Modifier.height(12.dp))
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = "Immagine generata",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Ink, RoundedCornerShape(12.dp)),
+            )
+        } else {
+            Text("Nessuna immagine ancora. Carica un modello e premi Genera.", color = Smoke)
+        }
+    }
+}
+
+@Composable
 private fun ModelsScreen(
     state: AppUiState,
     onDownload: (HfModel) -> Unit,
     onLoad: (HfModel) -> Unit,
+    onHfQueryChange: (String) -> Unit,
+    onHfTokenChange: (String) -> Unit,
+    onSearchHf: () -> Unit,
+    onPickHfRepo: (HfSearchHit) -> Unit,
+    onAddCustom: (String, String) -> Unit,
 ) {
     LazyColumn(
         Modifier
@@ -578,21 +707,120 @@ private fun ModelsScreen(
     ) {
         item {
             Text(
-                "Modelli Hugging Face",
+                "Scegli modello Hugging Face",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = Ink,
             )
             Text(
-                "AI + esecuzione codice (Python/JS) sul telefono.",
+                "Cerca qualsiasi repo. GGUF = chat. Janus/SD ONNX = immagini.",
                 color = Smoke,
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                if (state.engineReady) "Motore AI pronto" else "Motore AI in avvio…",
-                color = if (state.engineReady) Moss else Smoke,
-                fontWeight = FontWeight.Medium,
+            Spacer(Modifier.height(8.dp))
+            BasicTextField(
+                value = state.hfQuery,
+                onValueChange = onHfQueryChange,
+                textStyle = TextStyle(color = Ink, fontSize = 16.sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Sand, RoundedCornerShape(10.dp))
+                    .padding(12.dp),
             )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onSearchHf,
+                    enabled = !state.hfSearching,
+                    colors = ButtonDefaults.buttonColors(containerColor = Moss),
+                ) { Text(if (state.hfSearching) "Cerco…" else "Cerca su HF") }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf("uncensored gguf", "dolphin gguf", "janus onnx", "stable diffusion onnx").forEach { q ->
+                    FilterChip(selected = state.hfQuery == q, onClick = {
+                        onHfQueryChange(q)
+                    }, label = { Text(q) })
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("Token HF (opzionale, per repo gated)", color = Smoke, fontSize = 12.sp)
+            BasicTextField(
+                value = state.hfToken,
+                onValueChange = onHfTokenChange,
+                textStyle = TextStyle(color = Ink, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Sand, RoundedCornerShape(10.dp))
+                    .padding(10.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (state.engineReady) "Motore chat pronto" else "Motore chat in avvio…",
+                color = if (state.engineReady) Moss else Smoke,
+            )
+            Text(
+                if (state.imageEngineReady) "Motore immagini pronto" else "Motore immagini in avvio…",
+                color = if (state.imageEngineReady) Moss else Smoke,
+            )
+        }
+        if (state.hfResults.isNotEmpty()) {
+            item {
+                Text("Risultati ricerca", fontWeight = FontWeight.SemiBold, color = Ink)
+            }
+            items(state.hfResults) { hit ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Sand, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                ) {
+                    Text(hit.repoId, fontWeight = FontWeight.Medium, color = Ink)
+                    Text(
+                        hit.pipelineTag + if (hit.gated) " · gated" else "",
+                        color = Smoke,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = { onPickHfRepo(hit) },
+                        enabled = !state.busy,
+                    ) { Text("Usa questo repo") }
+                }
+            }
+        }
+        if (state.hfFiles.isNotEmpty()) {
+            item {
+                Text("File GGUF del repo (tocca per aggiungere)", fontWeight = FontWeight.Medium, color = Ink)
+            }
+            items(state.hfFiles.take(12)) { file ->
+                TextButton(onClick = {
+                    val repo = state.selectedHfRepo ?: return@TextButton
+                    onAddCustom(repo, file)
+                }) {
+                    Text(file, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Ink)
+                }
+            }
+        }
+        item {
+            Text("I tuoi modelli", fontWeight = FontWeight.SemiBold, color = Ink)
+        }
+        items(state.customModels) { model ->
+            ModelCard(
+                model = model,
+                selected = state.selectedModelId == model.id,
+                downloaded = model.id in state.downloadedIds,
+                progress = state.downloadProgress[model.id],
+                busy = state.busy,
+                engineReady = if (model.kind == ModelKind.IMAGE) state.imageEngineReady else state.engineReady,
+                onDownload = { onDownload(model) },
+                onLoad = { onLoad(model) },
+            )
+        }
+        item {
+            Text("Catalogo", fontWeight = FontWeight.SemiBold, color = Ink)
         }
         items(ModelCatalog.models) { model ->
             ModelCard(
@@ -601,7 +829,7 @@ private fun ModelsScreen(
                 downloaded = model.id in state.downloadedIds,
                 progress = state.downloadProgress[model.id],
                 busy = state.busy,
-                engineReady = state.engineReady,
+                engineReady = if (model.kind == ModelKind.IMAGE) state.imageEngineReady else state.engineReady,
                 onDownload = { onDownload(model) },
                 onLoad = { onLoad(model) },
             )
@@ -620,6 +848,7 @@ private fun ModelCard(
     onDownload: () -> Unit,
     onLoad: () -> Unit,
 ) {
+    val isImage = model.kind == ModelKind.IMAGE
     Column(
         Modifier
             .fillMaxWidth()
@@ -627,7 +856,11 @@ private fun ModelCard(
             .padding(14.dp),
     ) {
         Text(model.name, fontWeight = FontWeight.SemiBold, color = Ink)
-        Text(model.sizeLabel + " · " + model.tags.joinToString(" · "), color = Smoke, fontSize = 12.sp)
+        Text(
+            model.sizeLabel + " · " + (if (isImage) "immagini" else "chat") + " · " + model.tags.joinToString(" · "),
+            color = Smoke,
+            fontSize = 12.sp,
+        )
         Spacer(Modifier.height(6.dp))
         Text(model.description, color = Ink)
         Spacer(Modifier.height(4.dp))
@@ -638,19 +871,27 @@ private fun ModelCard(
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onDownload, enabled = !busy) {
-                Icon(Icons.Default.Download, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text(if (downloaded) "Riscarica" else "Scarica")
+            if (!isImage) {
+                OutlinedButton(onClick = onDownload, enabled = !busy) {
+                    Icon(Icons.Default.Download, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (downloaded) "Riscarica" else "Scarica")
+                }
             }
             Button(
                 onClick = onLoad,
                 enabled = !busy && engineReady,
                 colors = ButtonDefaults.buttonColors(containerColor = Moss),
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Icon(if (isImage) Icons.Default.Download else Icons.Default.PlayArrow, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text(if (selected && downloaded) "Ricarica" else "Carica in AI")
+                Text(
+                    when {
+                        isImage -> "Scarica e carica"
+                        selected && downloaded -> "Ricarica"
+                        else -> "Carica in AI"
+                    },
+                )
             }
         }
     }

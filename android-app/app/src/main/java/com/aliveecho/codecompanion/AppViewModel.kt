@@ -4,11 +4,19 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.graphics.BitmapFactory
+import android.util.Base64
 import com.aliveecho.codecompanion.data.CompileClient
 import com.aliveecho.codecompanion.data.CompileResult
+import com.aliveecho.codecompanion.data.HfSearchHit
+import com.aliveecho.codecompanion.data.HuggingFaceApi
 import com.aliveecho.codecompanion.data.ModelDownloader
+import com.aliveecho.codecompanion.image.ImageEngine
 import com.aliveecho.codecompanion.inference.InferenceEngine
 import com.aliveecho.codecompanion.runtime.LocalRuntimeEngine
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -57,6 +65,19 @@ data class AppUiState(
     val compiling: Boolean = false,
     val lastCompile: CompileResult? = null,
     val compileLog: String = "Nessuna compilazione ancora.",
+    val hfQuery: String = "uncensored gguf",
+    val hfToken: String = "",
+    val hfSearching: Boolean = false,
+    val hfResults: List<HfSearchHit> = emptyList(),
+    val hfFiles: List<String> = emptyList(),
+    val selectedHfRepo: String? = null,
+    val customModels: List<HfModel> = emptyList(),
+    val imagePrompt: String = "",
+    val imageStatus: String = "Motore immagini in avvio…",
+    val imageEngineReady: Boolean = false,
+    val loadedImageModel: String? = null,
+    val generatingImage: Boolean = false,
+    val lastImagePath: String? = null,
 )
 
 private const val DEFAULT_CODE = """def greet(name):
@@ -71,13 +92,18 @@ private const val KEY_AUTO = "auto_compile"
 private const val KEY_AUTO_FIX = "auto_fix"
 private const val KEY_LANG = "language"
 private const val KEY_MODE = "compile_mode"
+private const val KEY_TOKEN = "hf_token"
+private const val KEY_CUSTOM = "custom_models"
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     val engine = InferenceEngine(application)
     val localRuntime = LocalRuntimeEngine()
+    val imageEngine = ImageEngine()
     private val downloader = ModelDownloader(application.filesDir.resolve("models"))
     private val compileClient = CompileClient()
+    private val hfApi = HuggingFaceApi()
     private val prefs = application.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val imagesDir = application.filesDir.resolve("images").apply { mkdirs() }
 
     private val _ui = MutableStateFlow(
         AppUiState(
@@ -91,6 +117,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 CompileMode.LOCAL
             },
+            hfToken = prefs.getString(KEY_TOKEN, "") ?: "",
+            customModels = loadCustomModels(),
         ),
     )
     val ui: StateFlow<AppUiState> = _ui.asStateFlow()
@@ -121,6 +149,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (ready && _ui.value.autoCompile) {
                     scheduleCompile(immediate = true)
                 }
+            }
+        }
+        viewModelScope.launch {
+            imageEngine.ready.collect { ready ->
+                _ui.update { it.copy(imageEngineReady = ready) }
+            }
+        }
+        viewModelScope.launch {
+            imageEngine.status.collect { status ->
+                _ui.update { it.copy(imageStatus = status) }
+            }
+        }
+        viewModelScope.launch {
+            imageEngine.loadedModel.collect { model ->
+                _ui.update { it.copy(loadedImageModel = model) }
             }
         }
         viewModelScope.launch {
@@ -220,6 +263,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadModel(model: HfModel) {
+        rememberCustom(model)
+        if (model.kind == ModelKind.IMAGE) {
+            loadImageModel(model)
+            return
+        }
         viewModelScope.launch {
             _ui.update { it.copy(busy = true, error = null) }
             try {
@@ -247,6 +295,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadModel(model: HfModel) {
+        rememberCustom(model)
+        if (model.kind == ModelKind.IMAGE) {
+            loadImageModel(model)
+            return
+        }
         viewModelScope.launch {
             _ui.update { it.copy(busy = true, error = null, selectedModelId = model.id) }
             try {
@@ -262,6 +315,182 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _ui.update { it.copy(busy = false) }
             }
         }
+    }
+
+    fun updateHfQuery(value: String) {
+        _ui.update { it.copy(hfQuery = value) }
+    }
+
+    fun updateHfToken(value: String) {
+        prefs.edit().putString(KEY_TOKEN, value).apply()
+        _ui.update { it.copy(hfToken = value) }
+    }
+
+    fun updateImagePrompt(value: String) {
+        _ui.update { it.copy(imagePrompt = value) }
+    }
+
+    fun searchHuggingFace() {
+        val query = _ui.value.hfQuery.trim()
+        viewModelScope.launch {
+            _ui.update { it.copy(hfSearching = true, error = null) }
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    hfApi.search(query, _ui.value.hfToken.ifBlank { null })
+                }
+                _ui.update { it.copy(hfResults = results, hfSearching = false, hfFiles = emptyList()) }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        hfSearching = false,
+                        error = e.message ?: "Ricerca Hugging Face fallita",
+                    )
+                }
+            }
+        }
+    }
+
+    fun pickHfRepo(hit: HfSearchHit) {
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, error = null) }
+            try {
+                val files = withContext(Dispatchers.IO) {
+                    hfApi.listFiles(hit.repoId, _ui.value.hfToken.ifBlank { null })
+                }
+                val model = hfApi.toModelFromRepo(hit.repoId, null, hit.pipelineTag, files)
+                rememberCustom(model)
+                _ui.update {
+                    it.copy(
+                        hfFiles = files.filter { name -> name.endsWith(".gguf", true) },
+                        selectedHfRepo = hit.repoId,
+                    )
+                }
+            } catch (e: Exception) {
+                _ui.update { it.copy(error = e.message ?: "Impossibile leggere il repo") }
+            } finally {
+                _ui.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    fun addCustomGguf(repo: String, file: String) {
+        val model = HfModel(
+            id = "custom-" + repo.replace('/', '_') + "-" + file.hashCode(),
+            name = repo.substringAfterLast('/'),
+            repo = repo.trim(),
+            file = file.trim(),
+            sizeLabel = "custom",
+            description = "Modello scelto da Hugging Face",
+            tags = listOf("custom"),
+            kind = if (file.endsWith(".gguf", true)) ModelKind.LLM else ModelKind.IMAGE,
+        )
+        rememberCustom(model)
+    }
+
+    fun loadImageModel(model: HfModel) {
+        rememberCustom(model)
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, error = null, selectedModelId = model.id) }
+            try {
+                imageEngine.loadModel(
+                    repo = model.repo,
+                    dtype = model.file.ifBlank { "q4" },
+                    token = _ui.value.hfToken.ifBlank { null },
+                )
+                _ui.update { it.copy(loadedImageModel = model.repo) }
+            } catch (e: Exception) {
+                _ui.update { it.copy(error = e.message ?: "Caricamento modello immagini fallito") }
+            } finally {
+                _ui.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    fun generateImage() {
+        val prompt = _ui.value.imagePrompt.trim()
+        if (prompt.isEmpty()) {
+            _ui.update { it.copy(error = "Scrivi un prompt per l'immagine.") }
+            return
+        }
+        if (_ui.value.loadedImageModel == null) {
+            _ui.update { it.copy(error = "Prima scarica/carica un modello immagini nella scheda Modelli.") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(generatingImage = true, error = null) }
+            try {
+                val dataUrl = imageEngine.generate(prompt)
+                val path = withContext(Dispatchers.IO) { saveDataUrl(dataUrl) }
+                _ui.update { it.copy(lastImagePath = path, generatingImage = false) }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        generatingImage = false,
+                        error = e.message ?: "Generazione immagine fallita",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun saveDataUrl(dataUrl: String): String {
+        val b64 = dataUrl.substringAfter("base64,", missingDelimiterValue = "")
+        if (b64.isBlank()) throw IllegalStateException("Immagine non valida")
+        val bytes = Base64.decode(b64, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw IllegalStateException("PNG non decodificabile")
+        val out = File(imagesDir, "img-${System.currentTimeMillis()}.png")
+        out.writeBytes(bytes)
+        return out.absolutePath
+    }
+
+    private fun rememberCustom(model: HfModel) {
+        val current = _ui.value.customModels.toMutableList()
+        current.removeAll { it.id == model.id || (it.repo == model.repo && it.file == model.file) }
+        current.add(0, model)
+        val trimmed = current.take(30)
+        _ui.update { it.copy(customModels = trimmed) }
+        prefs.edit().putString(KEY_CUSTOM, serializeCustom(trimmed)).apply()
+    }
+
+    private fun loadCustomModels(): List<HfModel> {
+        val raw = prefs.getString(KEY_CUSTOM, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                HfModel(
+                    id = o.optString("id"),
+                    name = o.optString("name"),
+                    repo = o.optString("repo"),
+                    file = o.optString("file"),
+                    sizeLabel = o.optString("sizeLabel", "custom"),
+                    description = o.optString("description", ""),
+                    tags = o.optString("tags").split(',').filter { it.isNotBlank() },
+                    kind = if (o.optString("kind") == "IMAGE") ModelKind.IMAGE else ModelKind.LLM,
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun serializeCustom(models: List<HfModel>): String {
+        val arr = JSONArray()
+        models.forEach { m ->
+            arr.put(
+                JSONObject()
+                    .put("id", m.id)
+                    .put("name", m.name)
+                    .put("repo", m.repo)
+                    .put("file", m.file)
+                    .put("sizeLabel", m.sizeLabel)
+                    .put("description", m.description)
+                    .put("tags", m.tags.joinToString(","))
+                    .put("kind", m.kind.name),
+            )
+        }
+        return arr.toString()
     }
 
     fun sendChat(userOverride: String? = null, fromAutoFix: Boolean = false) {
@@ -401,8 +630,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun refreshDownloaded() {
-        val downloaded = ModelCatalog.models
-            .filter { downloader.isDownloaded(it.repo, it.file) }
+        val all = ModelCatalog.models + _ui.value.customModels
+        val downloaded = all
+            .filter { it.kind == ModelKind.LLM && downloader.isDownloaded(it.repo, it.file) }
             .map { it.id }
             .toSet()
         _ui.update { it.copy(downloadedIds = downloaded) }

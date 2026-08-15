@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeCompanion Image Engine</title>
+</head>
+<body>
+  <div id="status">Motore immagini in avvio…</div>
+  <script type="module">
+    import { AutoProcessor, MultiModalityCausalLM, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.4.2";
+
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
+
+    const statusEl = document.getElementById("status");
+    let processor = null;
+    let model = null;
+    let loadedRepo = null;
+    let sdPipe = null;
+    let backend = "janus";
+
+    function bridge(fn, arg) {
+      try {
+        if (window.ImageBridge && typeof window.ImageBridge[fn] === "function") {
+          window.ImageBridge[fn](String(arg == null ? "" : arg));
+        }
+      } catch (e) {}
+    }
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+      bridge("onStatus", msg);
+    }
+
+    function progressCb(info) {
+      try {
+        if (!info) return;
+        const status = info.status || "";
+        const file = info.file || info.name || "";
+        const loaded = info.loaded || 0;
+        const total = info.total || 0;
+        if (total > 0) {
+          setStatus("Download " + file + ": " + Math.round((loaded / total) * 100) + "%");
+        } else {
+          setStatus(status + " " + file);
+        }
+      } catch (e) {}
+    }
+
+    async function rawToDataUrl(raw) {
+      if (!raw) throw new Error("Nessuna immagine generata");
+      if (typeof raw.toCanvas === "function") {
+        const canvas = raw.toCanvas();
+        return canvas.toDataURL("image/png");
+      }
+      if (typeof raw.save === "function" && typeof OffscreenCanvas !== "undefined") {
+        // fall through to pixel copy
+      }
+      const width = raw.width;
+      const height = raw.height;
+      const src = raw.data || raw.rgba || raw;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      const rgba = new Uint8ClampedArray(width * height * 4);
+      const channels = raw.channels || (src.length / (width * height));
+      for (let i = 0, p = 0; i < width * height; i++) {
+        if (channels === 4) {
+          rgba[p++] = src[i * 4];
+          rgba[p++] = src[i * 4 + 1];
+          rgba[p++] = src[i * 4 + 2];
+          rgba[p++] = src[i * 4 + 3];
+        } else {
+          rgba[p++] = src[i * 3];
+          rgba[p++] = src[i * 3 + 1];
+          rgba[p++] = src[i * 3 + 2];
+          rgba[p++] = 255;
+        }
+      }
+      ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+      return canvas.toDataURL("image/png");
+    }
+
+    window.loadImageModel = async function (repo, dtype, token) {
+      loadedRepo = null;
+      processor = null;
+      model = null;
+      sdPipe = null;
+      const id = String(repo || "").trim();
+      const dt = String(dtype || "q4").trim() || "q4";
+      if (token) {
+        env.remoteHost = "https://huggingface.co";
+      }
+      setStatus("Download/caricamento modello immagini: " + id);
+      const looksSd = /diffusion|sd-|sdxl|turbo|diffusers/i.test(id) || dt === "cpu";
+      if (looksSd && !/janus/i.test(id)) {
+        backend = "sd";
+        try {
+          const mod = await import("https://cdn.jsdelivr.net/npm/@aislamov/diffusers.js@0.9.3/+esm");
+          const DiffusionPipeline = mod.DiffusionPipeline || (mod.default && mod.default.DiffusionPipeline);
+          if (!DiffusionPipeline) throw new Error("diffusers.js non disponibile");
+          const opts = { revision: dt === "q4" ? "cpu" : dt };
+          sdPipe = await DiffusionPipeline.fromPretrained(id, opts);
+          loadedRepo = id;
+          setStatus("Modello SD pronto (nessun safety checker)");
+          bridge("onModelLoaded", id);
+          return id;
+        } catch (e) {
+          setStatus("SD fallito, provo Janus: " + e);
+        }
+      }
+      backend = "janus";
+      const loadOpts = {
+        dtype: dt === "cpu" ? "q4" : dt,
+        progress_callback: progressCb,
+      };
+      if (token) loadOpts.token = token;
+      processor = await AutoProcessor.from_pretrained(id, loadOpts);
+      model = await MultiModalityCausalLM.from_pretrained(id, loadOpts);
+      loadedRepo = id;
+      setStatus("Modello immagini pronto (nessun filtro extra)");
+      bridge("onModelLoaded", id);
+      return id;
+    };
+
+    window.generateImage = async function (prompt, steps) {
+      if (!loadedRepo) throw new Error("Nessun modello immagini caricato");
+      const text = String(prompt || "").trim();
+      if (!text) throw new Error("Prompt vuoto");
+      setStatus("Generazione immagine…");
+      if (backend === "sd" && sdPipe) {
+        const n = Number(steps) || 20;
+        const images = await sdPipe.run({
+          prompt: text,
+          numInferenceSteps: n,
+          guidanceScale: 7.0,
+        });
+        const canvas = document.createElement("canvas");
+        canvas.width = 512;
+        canvas.height = 512;
+        const data = await images[0].toImageData({ tensorLayout: "NCWH", format: "RGB" });
+        canvas.getContext("2d").putImageData(data, 0, 0);
+        const url = canvas.toDataURL("image/png");
+        setStatus("Immagine pronta");
+        bridge("onImage", url);
+        return url;
+      }
+      const conversation = [{ role: "<|User|>", content: text }];
+      const inputs = await processor(conversation, { chat_template: "text_to_image" });
+      const numImageTokens = processor.num_image_tokens;
+      const outputs = await model.generate_images({
+        ...inputs,
+        min_new_tokens: numImageTokens,
+        max_new_tokens: numImageTokens,
+        do_sample: true,
+      });
+      const raw = Array.isArray(outputs) ? outputs[0] : (outputs.images ? outputs.images[0] : outputs);
+      const url = await rawToDataUrl(raw);
+      setStatus("Immagine pronta");
+      bridge("onImage", url);
+      return url;
+    };
+
+    setStatus("Motore immagini pronto. Carica un modello.");
+    bridge("onReady", "ok");
+  </script>
+</body>
+</html>

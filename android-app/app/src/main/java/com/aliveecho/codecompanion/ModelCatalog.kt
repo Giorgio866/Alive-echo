@@ -1,5 +1,10 @@
 package com.aliveecho.codecompanion
 
+enum class ModelKind {
+    LLM,
+    IMAGE,
+}
+
 data class HfModel(
     val id: String,
     val name: String,
@@ -8,6 +13,7 @@ data class HfModel(
     val sizeLabel: String,
     val description: String,
     val tags: List<String>,
+    val kind: ModelKind = ModelKind.LLM,
 )
 
 object ModelCatalog {
@@ -56,6 +62,36 @@ object ModelCatalog {
             sizeLabel = "~1 MB",
             description = "Solo per test del motore. Non serve per programmare.",
             tags = listOf("test"),
+        ),
+        HfModel(
+            id = "janus-pro-1b",
+            name = "Janus Pro 1B ONNX (immagini)",
+            repo = "onnx-community/Janus-Pro-1B-ONNX",
+            file = "q4",
+            sizeLabel = "~1 GB (q4)",
+            description = "Genera immagini DENTRO l'app dopo il download. Nessun filtro extra nell'app.",
+            tags = listOf("immagini", "uncensored"),
+            kind = ModelKind.IMAGE,
+        ),
+        HfModel(
+            id = "janus-13b",
+            name = "Janus 1.3B ONNX (immagini)",
+            repo = "onnx-community/Janus-1.3B-ONNX",
+            file = "q4",
+            sizeLabel = "~1.2 GB (q4)",
+            description = "Modello immagini un po' più grande. Nessun safety checker nell'app.",
+            tags = listOf("immagini", "uncensored"),
+            kind = ModelKind.IMAGE,
+        ),
+        HfModel(
+            id = "sd21-onnx",
+            name = "Stable Diffusion 2.1 ONNX CPU",
+            repo = "aislamov/stable-diffusion-2-1-base-onnx",
+            file = "cpu",
+            sizeLabel = "~2+ GB",
+            description = "Diffusione classica, più pesante. Nessun safety checker. Serve tanta RAM.",
+            tags = listOf("immagini", "sd", "uncensored"),
+            kind = ModelKind.IMAGE,
         ),
     )
 }
