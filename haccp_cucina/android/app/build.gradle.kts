@@ -21,7 +21,7 @@ android {
 
     defaultConfig {
         applicationId = "it.haccpcucina.haccp_cucina"
-        minSdk = 23
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
