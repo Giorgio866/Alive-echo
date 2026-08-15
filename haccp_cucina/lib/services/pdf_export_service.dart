@@ -24,9 +24,13 @@ class PdfExportService {
     required List<PreparedBatch> batches,
     required List<ProductLot> lots,
     int days = AppDatabase.temperatureRetentionDays,
+    String? titleSuffix,
   }) async {
     final doc = pw.Document();
     final byPoint = {for (final p in points) p.id: p.name};
+    final heading = titleSuffix == null
+        ? 'Registro HACCP - ultimi $days giorni'
+        : 'Registro HACCP - $titleSuffix';
 
     doc.addPage(
       pw.MultiPage(
@@ -35,7 +39,7 @@ class PdfExportService {
         build: (context) => [
           pw.Text(activityName, style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 4),
-          pw.Text('Registro HACCP - ultimi $days giorni'),
+          pw.Text(heading),
           pw.Text('Generato il ${_stamp.format(DateTime.now())} - Operatore: $operatorName'),
           pw.SizedBox(height: 16),
           pw.Text('Temperature CCP', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),

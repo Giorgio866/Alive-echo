@@ -58,7 +58,6 @@ class HaccpRepository {
     );
     final db = await _database;
     await db.insert('temperature_readings', reading.toMap());
-    await AppDatabase.purgeOldTemperatureReadings(db);
     return reading;
   }
 

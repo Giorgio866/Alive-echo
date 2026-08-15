@@ -8,6 +8,7 @@ import '../data/models/temperature_models.dart';
 import '../data/repositories/haccp_repository.dart';
 import '../services/document_scan_service.dart';
 import '../services/expiry_notification_service.dart';
+import '../services/monthly_archive_service.dart';
 import '../services/pdf_export_service.dart';
 import '../services/settings_service.dart';
 import '../services/temperature_ocr_service.dart';
@@ -41,6 +42,13 @@ final temperatureOcrServiceProvider = Provider<TemperatureOcrService>((ref) {
 
 final pdfExportServiceProvider = Provider<PdfExportService>((ref) {
   return PdfExportService();
+});
+
+final monthlyArchiveServiceProvider = Provider<MonthlyArchiveService>((ref) {
+  return MonthlyArchiveService(
+    pdfExport: ref.watch(pdfExportServiceProvider),
+    settings: ref.watch(settingsServiceProvider),
+  );
 });
 
 final settingsProvider = FutureProvider<AppSettings>((ref) async {

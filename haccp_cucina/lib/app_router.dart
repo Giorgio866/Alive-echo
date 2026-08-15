@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/archives/archives_screen.dart';
 import '../features/cleaning/cleaning_screen.dart';
 import '../features/documents/documents_screen.dart';
 import '../features/home/home_screen.dart';
@@ -67,6 +68,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 path: '/temperature-history',
                 builder: (context, state) => const TemperatureHistoryScreen(),
               ),
+              GoRoute(path: '/archives', builder: (context, state) => const ArchivesScreen()),
               GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
             ],
           ),
@@ -142,6 +144,13 @@ class MoreHubScreen extends ConsumerWidget {
             title: 'Preparati / catalogo',
             subtitle: 'I tuoi ingredienti + etichetta in un tap',
             onTap: () => context.push('/ingredients'),
+          ),
+          const SizedBox(height: 10),
+          _HubTile(
+            icon: Icons.folder_special_outlined,
+            title: 'Archivi mensili',
+            subtitle: 'PDF/JSON salvati sul telefono prima della pulizia',
+            onTap: () => context.push('/archives'),
           ),
           const SizedBox(height: 10),
           _HubTile(

@@ -53,7 +53,7 @@ class AppDatabase {
         }
       },
     );
-    await purgeOldTemperatureReadings(db);
+    // La pulizia retention avviene SOLO dopo archivio mensile (MonthlyArchiveService).
     return db;
   }
 

@@ -39,8 +39,9 @@ class TemperatureHistoryScreen extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Text(
-                    'Conservazione automatica: ultimi ${AppDatabase.temperatureRetentionDays} giorni '
-                    '(${readings.length} letture in archivio).',
+                    'Conservazione: ultimi ${AppDatabase.temperatureRetentionDays} giorni. '
+                    'Ogni mese, prima di cancellare, salva un archivio PDF+JSON sul telefono '
+                    '(Altro → Archivi mensili).',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ),

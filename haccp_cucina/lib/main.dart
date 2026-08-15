@@ -13,14 +13,25 @@ Future<void> main() async {
   final container = ProviderContainer();
   await container.read(expiryNotificationServiceProvider).init();
 
+  // Archivio mensile sul telefono PRIMA di qualsiasi cancellazione automatica
   try {
     final repo = container.read(haccpRepositoryProvider);
+    // Forza apertura DB
+    await repo.getTemperaturePoints();
+    final archive = await container.read(monthlyArchiveServiceProvider).runIfNeeded(repo);
+    if (archive != null) {
+      // percorso disponibile in Impostazioni / Archivi
+      debugPrint('Archivio mensile salvato: ${archive.pdfPath}');
+    }
+
     final expiring = await repo.getExpiringBatches(withinHours: 24);
     final notifications = container.read(expiryNotificationServiceProvider);
     for (final batch in expiring) {
       await notifications.scheduleBatchExpiry(batch);
     }
-  } catch (_) {}
+  } catch (e, st) {
+    debugPrint('Avvio archivio/notifiche: $e\n$st');
+  }
 
   runApp(
     UncontrolledProviderScope(
