@@ -4,10 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
-import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import com.aliveecho.codecompanion.data.CompileResult
+import com.aliveecho.codecompanion.web.AssetWebView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,14 +32,9 @@ class LocalRuntimeEngine {
         webViewRef.get()?.let { return it }
         val webView = WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(1, 1)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.allowFileAccess = true
-            settings.allowContentAccess = true
-            settings.cacheMode = WebSettings.LOAD_DEFAULT
             addJavascriptInterface(Bridge(), "LocalBridge")
-            webViewClient = object : WebViewClient() {}
-            loadUrl("file:///android_asset/runtime/runtime.html")
+            AssetWebView.configure(context, this)
+            AssetWebView.loadAsset(this, "runtime/runtime.html")
         }
         webViewRef.set(webView)
         return webView

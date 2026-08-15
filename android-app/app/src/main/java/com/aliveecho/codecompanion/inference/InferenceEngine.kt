@@ -4,9 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
-import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
+import com.aliveecho.codecompanion.web.AssetWebView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,15 +44,9 @@ class InferenceEngine(context: Context) {
         webViewRef.get()?.let { return it }
         val webView = WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(1, 1)
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.allowFileAccess = true
-            settings.allowContentAccess = true
-            settings.cacheMode = WebSettings.LOAD_DEFAULT
-            settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             addJavascriptInterface(Bridge(), "AndroidBridge")
-            webViewClient = object : WebViewClient() {}
-            loadUrl("file:///android_asset/inference/engine.html")
+            AssetWebView.configure(context, this)
+            AssetWebView.loadAsset(this, "inference/engine.html")
         }
         webViewRef.set(webView)
         return webView

@@ -59,18 +59,41 @@
       }
     }
 
+    async function downloadBlob(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Download HTTP " + res.status + " " + url);
+      const total = Number(res.headers.get("content-length") || 0);
+      if (!res.body || !res.body.getReader) {
+        const buf = await res.arrayBuffer();
+        return new Blob([buf]);
+      }
+      const reader = res.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.byteLength;
+        if (total > 0) {
+          setStatus("Download modello: " + Math.round((loaded / total) * 100) + "%");
+        } else {
+          setStatus("Download modello: " + Math.round(loaded / (1024 * 1024)) + " MB");
+        }
+      }
+      return new Blob(chunks);
+    }
+
     window.loadModel = async function (repo, file) {
       if (!wllama) throw new Error("Motore non pronto");
       setStatus("Download modello da Hugging Face…");
       log("HF: " + repo + " / " + file);
-      await wllama.loadModelFromHF(repo, file, {
+      const url = "https://huggingface.co/" + repo + "/resolve/main/" + file;
+      const blob = await downloadBlob(url);
+      setStatus("Caricamento in memoria…");
+      await wllama.loadModel([blob], {
         n_ctx: 2048,
         n_threads: 1,
-        progressCallback: ({ loaded, total }) => {
-          if (!total) return;
-          const pct = Math.round((loaded / total) * 100);
-          setStatus("Download modello: " + pct + "%");
-        },
       });
       loadedModel = repo + "/" + file;
       setStatus("Modello caricato");
