@@ -53,7 +53,7 @@ class _IngredientsScreenState extends ConsumerState<IngredientsScreen>
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
               child: Text(
-                'Qui inserisci piatti e ingredienti (foto menu/PDF o a mano). '
+                'Qui inserisci gli ingredienti della pizza (foto menu/PDF o a mano). '
                 'Poi tocca Preparo e stampa l\'etichetta.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
@@ -310,7 +310,7 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
     ref.invalidate(ingredientCatalogProvider);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${items.length} voci aggiunte al catalogo (piatti e ingredienti)')),
+        SnackBar(content: Text('${items.length} ingredienti aggiunti al catalogo')),
       );
     }
   }
@@ -319,10 +319,10 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Menu Blue Eyes 2026'),
+        title: const Text('Ingredienti Blue Eyes 2026'),
         content: const Text(
-          'Importa pinse, pizze, dolci e ingredienti estratti dal PDF del menu. '
-          'Se una voce esiste già viene aggiornata (ricetta e allergeni).',
+          'Importa solo gli ingredienti delle pizze e pinse (mozzarella, pomodoro, salumi…). '
+          'Niente nomi dei piatti, dolci o bevande. Se c’era già il catalogo esempio, viene sostituito.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annulla')),
@@ -426,14 +426,13 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        'Passo 1 — inserisci piatti e ingredienti',
+                        'Passo 1 — inserisci gli ingredienti',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.tealDark),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Importa dal menu (foto/PDF) oppure aggiungi a mano. '
-                        'Vengono letti i nomi dei piatti e gli ingredienti. '
-                        'Poi tocca Preparo → etichetta.',
+                        'Importa dal menu (foto/PDF): vengono letti solo gli ingredienti delle pizze, '
+                        'non i nomi dei piatti. Poi tocca Preparo → etichetta.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
                       ),
                       const SizedBox(height: 10),
@@ -464,7 +463,7 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                           OutlinedButton.icon(
                             onPressed: _busy ? null : _importBlueEyesMenu,
                             icon: const Icon(Icons.restaurant_menu_outlined, size: 18),
-                            label: const Text('Menu Blue Eyes 2026'),
+                            label: const Text('Ingredienti Blue Eyes'),
                           ),
                         ],
                       ),
@@ -639,9 +638,6 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
       'uova' => 'Uova',
       'frutta_secca' => 'Frutta a guscio',
       'extra' => 'Extra',
-      'pinsa' => 'Pinse',
-      'pizza' => 'Pizze',
-      'dolce' => 'Dolci',
       _ => cat,
     };
   }

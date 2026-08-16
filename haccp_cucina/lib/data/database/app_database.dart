@@ -266,8 +266,9 @@ class AppDatabase {
     // Catalogo ingredienti: vuoto al primo avvio — lo carica l'utente nel setup.
   }
 
-  /// Import opzionale (non usato al seed).
+  /// Import opzionale: sostituisce il catalogo esempio Blue Eyes (solo ingredienti pizza).
   static Future<void> importBlueEyesCatalog(Database db) async {
+    await clearMenuCatalog(db);
     for (final item in blueEyesIngredientCatalog()) {
       await db.insert(
         'ingredient_catalog',

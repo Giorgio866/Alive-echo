@@ -255,7 +255,7 @@ class MenuCatalogImportService {
     return recognized.text;
   }
 
-  /// Parser menu: estrae **nomi piatti** (con ricetta) e gli ingredienti.
+  /// Parser menu: estrae **solo gli ingredienti** delle pizze/pinse, non i nomi dei piatti.
   @visibleForTesting
   List<MenuImportCandidate> parseMenuText(String text) {
     final lines = text
@@ -267,148 +267,107 @@ class MenuCatalogImportService {
     final seen = <String>{};
     final out = <MenuImportCandidate>[];
     var skipSection = false;
-    var sectionCategory = 'custom';
+    var inPizzaSection = false;
 
-    void addName(
-      String? name, {
-      String? category,
-      String? recipe,
-      bool isDish = false,
-    }) {
+    void addIngredient(String? name) {
       if (name == null) return;
       final key = name.toLowerCase();
-      if (!seen.add(key)) {
-        if (isDish || (recipe != null && recipe.isNotEmpty)) {
-          for (final item in out) {
-            if (item.name.toLowerCase() != key) continue;
-            if (isDish) item.isDish = true;
-            if (recipe != null && recipe.isNotEmpty) item.storageHint = recipe;
-            if (category != null) item.category = category;
-            item.recommendedDays = guessShelfDays(item.name);
-            break;
-          }
-        }
-        return;
-      }
-      final cat = category ?? guessCategory(name);
+      if (!seen.add(key)) return;
       out.add(
         MenuImportCandidate(
           name: name,
-          recommendedDays: isDish ? 1 : guessShelfDays(name),
-          category: cat,
-          storageHint: (recipe != null && recipe.isNotEmpty) ? recipe : 'In frigo 0-4 °C',
-          isDish: isDish,
+          recommendedDays: guessShelfDays(name),
+          category: guessCategory(name),
         ),
       );
     }
 
-    String? sectionFromHeader(String line) {
-      final compact = line.toLowerCase().replaceAll(RegExp(r'[^a-zàèéìòù]'), '');
-      if (compact.contains('pins')) return 'pinsa';
-      if (compact.contains('impasto')) return 'impasto';
-      if (compact.contains('dolc') || compact.contains('dessert')) return 'dolce';
-      if (compact.contains('pizz') ||
-          compact.contains('classic') ||
-          compact.contains('special') ||
-          compact.contains('calzon')) {
-        return 'pizza';
+    void addFromIngredientLine(String line) {
+      for (final part in line.split(RegExp(r'[,;/•·]| e | ed '))) {
+        addIngredient(_extractIngredientName(part.trim()));
       }
-      return null;
     }
 
     bool isSkipSection(String line) {
       final compact = line.toLowerCase().replaceAll(RegExp(r'[^a-zàèéìòù]'), '');
       return {
-        'bevande',
-        'vino',
-        'vini',
-        'birre',
-        'lenostrebirre',
-        'birretradizionali',
-        'caffetteria',
-      }.contains(compact);
+            'bevande',
+            'vino',
+            'vini',
+            'birre',
+            'lenostrebirre',
+            'birretradizionali',
+            'caffeamaridessert',
+            'caffetteria',
+            'antipasti',
+            'antipasto',
+            'dolci',
+            'dessert',
+          }.contains(compact) ||
+          compact.contains('dolc') ||
+          compact.contains('dessert') ||
+          compact.contains('caffe') ||
+          compact.contains('amar');
+    }
+
+    bool isPizzaSection(String line) {
+      final compact = line.toLowerCase().replaceAll(RegExp(r'[^a-zàèéìòù]'), '');
+      return compact.contains('pizz') ||
+          compact.contains('pins') ||
+          compact.contains('calzon') ||
+          compact.contains('classic') ||
+          compact.contains('special');
     }
 
     for (var i = 0; i < lines.length; i++) {
       final raw = lines[i];
-      final section = sectionFromHeader(raw);
-      if (section != null) {
-        skipSection = false;
-        sectionCategory = section;
+      final lower = raw.toLowerCase();
+      if (lower.contains('allergen') || lower.contains('produzione propria')) {
         continue;
       }
+
       if (isSkipSection(raw)) {
         skipSection = true;
+        inPizzaSection = false;
         continue;
       }
-      if (skipSection) {
+      if (isPizzaSection(raw) && !raw.contains(',')) {
+        skipSection = false;
+        inPizzaSection = true;
+        continue;
+      }
+      if (skipSection || !inPizzaSection) {
+        // Fuori dalle pizze: prendi solo la riga topping sotto un nome piatto.
+        final dishOutside = _extractDishHeader(raw);
+        if (dishOutside != null &&
+            i + 1 < lines.length &&
+            _looksLikeIngredientLine(lines[i + 1])) {
+          addFromIngredientLine(lines[i + 1]);
+        }
         continue;
       }
 
       final dish = _extractDishHeader(raw);
       if (dish != null) {
-        String? recipe;
         if (i + 1 < lines.length && _looksLikeIngredientLine(lines[i + 1])) {
-          recipe = lines[i + 1];
-          for (final part in recipe.split(RegExp(r'[,;/•·]| e | ed '))) {
-            addName(_extractDishName(part.trim()));
-          }
+          addFromIngredientLine(lines[i + 1]);
         }
-        var dishName = dish;
-        final lowerDish = dishName.toLowerCase();
-        if (sectionCategory == 'pinsa' && !lowerDish.contains('pinsa')) {
-          dishName = 'Pinsa $dishName';
-        } else if (sectionCategory == 'pizza' &&
-            !RegExp(r'pizza|calzone|pinsa').hasMatch(lowerDish)) {
-          dishName = 'Pizza $dishName';
-        }
-        final guessed = guessCategory(dishName);
-        final cat = guessed == 'custom' ? sectionCategory : guessed;
-        addName(dishName, category: cat, recipe: recipe, isDish: true);
         if (out.length >= 220) break;
         continue;
       }
 
       if (_looksLikeIngredientLine(raw)) {
-        for (final part in raw.split(RegExp(r'[,;/•·]| e | ed '))) {
-          addName(_extractDishName(part.trim()));
-        }
+        addFromIngredientLine(raw);
         continue;
       }
 
-      final paren = RegExp(r'\(([^)]{3,})\)').firstMatch(raw);
-      if (paren != null && raw.contains(',')) {
-        for (final part in paren.group(1)!.split(RegExp(r'[,;/]| e | ed '))) {
-          addName(_extractDishName(part.trim()));
-        }
-      }
       if (RegExp(r'^ingredienti\b', caseSensitive: false).hasMatch(raw)) {
         final rest = raw.replaceFirst(RegExp(r'^ingredienti\s*[:\-]?\s*', caseSensitive: false), '');
-        for (final part in rest.split(RegExp(r'[,;/•·]| e | ed '))) {
-          addName(_extractDishName(part.trim()));
-        }
-        continue;
+        addFromIngredientLine(rest);
       }
-      addName(_extractDishName(raw));
       if (out.length >= 220) break;
     }
 
-    final block = RegExp(
-      r'ingredienti\s*[:\-]?\s*(.+?)(?=\n\s*[A-Z][A-Z ]{3,}|\n\s*allergen|$)',
-      caseSensitive: false,
-      dotAll: true,
-    ).firstMatch(text);
-    if (block != null) {
-      final chunk = block.group(1)!.replaceAll(RegExp(r'[\r\n]+'), ',');
-      for (final part in chunk.split(RegExp(r'[,;/•·]'))) {
-        addName(_extractDishName(part.trim()));
-      }
-    }
-
-    out.sort((a, b) {
-      if (a.isDish == b.isDish) return 0;
-      return a.isDish ? -1 : 1;
-    });
     return out.take(220).toList();
   }
 
@@ -445,6 +404,33 @@ class MenuCatalogImportService {
     if (s == s.toUpperCase() && line.split(' ').length <= 4) return false;
     return s.contains(',') ||
         RegExp(r'pomodoro|mozzarella|bufala|olio|farina|impasto').hasMatch(s);
+  }
+
+  String? _extractIngredientName(String line) {
+    var s = line.trim();
+    s = s.replaceAll(RegExp(r"\bin cottura\b", caseSensitive: false), ' ');
+    s = s.replaceAll(RegExp(r"all['’]?uscita\s*:?\s*", caseSensitive: false), ' ');
+    s = s.replaceAll(RegExp(r'\bdoc\b', caseSensitive: false), ' ');
+    s = s.replaceAll(RegExp(r'[:"«»]'), ' ');
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (s.length < 3 || s.length > 60) return null;
+    final lower = s.toLowerCase();
+    if ({
+      'scaglie',
+      'bianca',
+      'rossa',
+      'picc',
+      'cotto',
+      'crudo',
+      'halal',
+      'giovanna',
+    }.contains(lower)) {
+      if (lower == 'cotto') return 'Prosciutto cotto';
+      if (lower == 'crudo') return 'Prosciutto crudo';
+      return null;
+    }
+    if (RegExp(r'^(pizza|pinsa|calzone)\b', caseSensitive: false).hasMatch(s)) return null;
+    return _extractDishName(s);
   }
 
   String _cleanLine(String line) {

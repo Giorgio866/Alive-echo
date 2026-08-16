@@ -6,7 +6,7 @@ void main() {
 
   final service = MenuCatalogImportService();
 
-  test('parseMenuText extracts dishes and skips prices/headers', () {
+  test('parseMenuText extracts only pizza ingredients, not dish names', () {
     const text = '''
 MENU
 PIZZE
@@ -25,25 +25,24 @@ Acqua 1 L € 3,00
 ''';
     final items = service.parseMenuText(text);
     final names = items.map((e) => e.name.toLowerCase()).toList();
-    expect(names, contains('pizza margherita'));
-    expect(names, contains('pizza marinara'));
-    expect(names, contains('pizza diavola'));
     expect(names, contains('pomodoro'));
     expect(names, contains('mozzarella'));
-    expect(names, contains('bruschetta pomodoro'));
-    expect(names, contains('mozzarella di bufala'));
+    expect(names, contains('aglio'));
+    expect(names, contains('origano'));
+    expect(names, contains('salamino'));
+    expect(names.any((n) => n.contains('margherita')), isFalse);
+    expect(names.any((n) => n.contains('marinara')), isFalse);
+    expect(names.any((n) => n.contains('diavola')), isFalse);
+    expect(names.any((n) => n.contains('pizza')), isFalse);
+    expect(names.any((n) => n.contains('bruschetta')), isFalse);
     expect(names.any((n) => n.contains('allergen')), isFalse);
     expect(names, isNot(contains('menu')));
     expect(names, isNot(contains('pizze')));
     expect(names.any((n) => n.contains('acqua')), isFalse);
-
-    final margherita = items.firstWhere((e) => e.name.toLowerCase() == 'pizza margherita');
-    expect(margherita.isDish, isTrue);
-    expect(margherita.storageHint.toLowerCase(), contains('pomodoro'));
-    expect(margherita.category, 'pizza');
+    expect(items.every((e) => !e.isDish), isTrue);
   });
 
-  test('parseMenuText keeps pinsa dishes with recipe, not only toppings', () {
+  test('parseMenuText keeps pinsa toppings and skips dish titles', () {
     const text = '''
 PINSE ROMANE
 ASSUNTA € 13,00
@@ -52,17 +51,18 @@ BERGA (BIANCA) € 14,00
 Mozzarella, verdure grigliate, carciofi
 BEVANDE
 Acqua 1 L € 3,00
+TIRAMISÙ CLASSICO € 5,00
 ''';
     final items = service.parseMenuText(text);
     final names = items.map((e) => e.name.toLowerCase()).toList();
-    expect(names, contains('pinsa assunta'));
-    expect(names, contains('pinsa berga (bianca)'));
     expect(names, contains('mozzarella'));
+    expect(names, contains('pancetta'));
+    expect(names, contains('carciofi'));
+    expect(names.any((n) => n.contains('assunta')), isFalse);
+    expect(names.any((n) => n.contains('berga')), isFalse);
+    expect(names.any((n) => n.contains('pinsa')), isFalse);
+    expect(names.any((n) => n.contains('tiramisu') || n.contains('tiramisù')), isFalse);
     expect(names.any((n) => n.contains('acqua')), isFalse);
-    final assunta = items.firstWhere((e) => e.name.toLowerCase() == 'pinsa assunta');
-    expect(assunta.isDish, isTrue);
-    expect(assunta.category, 'pinsa');
-    expect(assunta.storageHint.toLowerCase(), contains('san marzano'));
   });
 
   test('guessShelfDays uses food keywords', () {

@@ -110,7 +110,7 @@ class _MenuImportReviewSheetState extends State<_MenuImportReviewSheet> {
               child: Text(
                 _items.isEmpty
                     ? 'Nessuna voce riconosciuta. Prova una foto piu nitida o un PDF del menu.'
-                    : 'Seleziona piatti e ingredienti da aggiungere. I piatti restano in cima, con la ricetta sotto.',
+                    : 'Seleziona gli ingredienti da aggiungere al catalogo. Puoi correggere nome e giorni.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.slateMuted),
               ),
             ),
@@ -141,57 +141,29 @@ class _MenuImportReviewSheetState extends State<_MenuImportReviewSheet> {
                           contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                           title: TextField(
                             controller: _nameCtrls[index],
-                            decoration: InputDecoration(
+                            decoration: const InputDecoration(
                               isDense: true,
                               border: InputBorder.none,
                               hintText: 'Nome',
-                              prefixIcon: Icon(
-                                item.isDish ? Icons.local_pizza_outlined : Icons.egg_alt_outlined,
-                                size: 18,
-                              ),
-                              prefixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                             ),
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          subtitle: Row(
                             children: [
-                              Text(
-                                item.isDish ? 'Piatto' : 'Ingrediente',
-                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                      color: AppColors.tealDark,
-                                    ),
-                              ),
-                              if (item.isDish &&
-                                  item.storageHint.isNotEmpty &&
-                                  item.storageHint != 'In frigo 0-4 °C')
-                                Text(
-                                  item.storageHint,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: AppColors.slateMuted,
-                                      ),
-                                ),
-                              Row(
-                                children: [
-                                  const Text('Giorni scad. '),
-                                  SizedBox(
-                                    width: 56,
-                                    child: TextField(
-                                      controller: _daysCtrls[index],
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(
-                                        isDense: true,
-                                        border: OutlineInputBorder(),
-                                      ),
-                                    ),
+                              const Text('Giorni scad. '),
+                              SizedBox(
+                                width: 56,
+                                child: TextField(
+                                  controller: _daysCtrls[index],
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
                                   ),
-                                ],
+                                ),
                               ),
                             ],
                           ),
-                          isThreeLine: true,
                           controlAffinity: ListTileControlAffinity.leading,
                         );
                       },

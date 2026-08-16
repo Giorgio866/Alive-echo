@@ -173,17 +173,18 @@ void main() {
       expect(items.every((i) => i.recommendedDays > 0), isTrue);
     });
 
-    test('include piatti Blue Eyes 2026 con ricetta', () {
+    test('include solo ingredienti pizza, non i piatti', () {
       final items = blueEyesIngredientCatalog();
       final byId = {for (final i in items) i.id: i};
-      expect(byId['pinsa_assunta']!.name, 'Pinsa Assunta');
-      expect(byId['pinsa_assunta']!.storageHint.toLowerCase(), contains('san marzano'));
-      expect(byId['pz_margherita']!.storageHint.toLowerCase(), contains('mozzarella'));
-      expect(byId['pz_blue_eyes']!.storageHint.toLowerCase(), contains('speck'));
-      expect(byId['pz_siciliana']!.allergens, isNot(contains('Latte')));
+      expect(byId['pomodoro'], isNotNull);
+      expect(byId['mozzarella'], isNotNull);
       expect(byId['imp_tirata'], isNotNull);
-      expect(items.where((i) => i.category == 'pizza').length, greaterThan(40));
-      expect(items.where((i) => i.category == 'pinsa').length, 11);
+      expect(byId.containsKey('pinsa_assunta'), isFalse);
+      expect(byId.containsKey('pz_margherita'), isFalse);
+      expect(byId.containsKey('dolce_tiramisu'), isFalse);
+      expect(items.where((i) => i.category == 'pizza'), isEmpty);
+      expect(items.where((i) => i.category == 'pinsa'), isEmpty);
+      expect(items.where((i) => i.category == 'dolce'), isEmpty);
     });
   });
 group('PdfExportService', () {
