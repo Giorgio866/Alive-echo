@@ -18,6 +18,7 @@ class MenuImportCandidate {
     this.category = 'custom',
     this.storageHint = 'In frigo 0-4 °C',
     this.allergens,
+    this.isDish = false,
   });
 
   String name;
@@ -26,6 +27,7 @@ class MenuImportCandidate {
   String category;
   String storageHint;
   String? allergens;
+  bool isDish;
 }
 
 class MenuImportResult {
@@ -68,11 +70,23 @@ class MenuCatalogImportService {
     'caffetteria',
     'page',
     'pagina',
+    'caffè',
+    'caffe',
+    'amaro',
+    'whiskey',
+    'grappe',
+    'ginseng',
+    'pepsi',
+    'coca cola',
+    'fanta',
+    'sprite',
   };
 
   static const _skipContains = [
     'allergen',
-    'glutine',
+    'contenenti glutine',
+    'prodotti derivati',
+    'intolleranz',
     'contiene',
     'www.',
     'http',
@@ -84,6 +98,9 @@ class MenuCatalogImportService {
     'partita iva',
     'p.iva',
     'via ',
+    'produzione propria',
+    'possono variare',
+    'scegli il tuo',
   ];
 
   static const _categoryHeaders = {
@@ -106,6 +123,7 @@ class MenuCatalogImportService {
     'bruschette',
     'calzoni',
     'focacce',
+    'pinse',
     'panini',
     'hamburger',
     'kebab',
@@ -124,6 +142,9 @@ class MenuCatalogImportService {
   /// Stima giorni di scadenza tipici da parole chiave.
   int guessShelfDays(String name) {
     final n = name.toLowerCase();
+    if (RegExp(r'\bpizza\b|\bpinsa\b|calzone|margherita|marinara|diavola|bufalina').hasMatch(n)) {
+      return 1;
+    }
     if (RegExp(r'rucola|basilico|insalata|misticanza|erba').hasMatch(n)) return 1;
     if (RegExp(r'salmone|tonno|gamber|pesce|acciug|carpaccio|crudo di').hasMatch(n)) return 1;
     if (RegExp(r'uovo|carbonara').hasMatch(n)) return 1;
@@ -139,7 +160,12 @@ class MenuCatalogImportService {
 
   String guessCategory(String name) {
     final n = name.toLowerCase();
-    if (RegExp(r'impasto|pinsa|biga').hasMatch(n)) return 'impasto';
+    if (RegExp(r'^impasto\b|biga').hasMatch(n)) return 'impasto';
+    if (RegExp(r'\bpinsa\b').hasMatch(n) && !n.contains('impasto')) return 'pinsa';
+    if (RegExp(r'\bpizza\b|calzone|margherita|marinara|diavola|bufalina').hasMatch(n)) {
+      return 'pizza';
+    }
+    if (RegExp(r'tiramisu|cheesecake|torta|tartufo|nutellino').hasMatch(n)) return 'dolce';
     if (RegExp(r'salsa|pomodoro|crema').hasMatch(n)) return 'salsa';
     if (RegExp(r'mozzarella|bufala|ricotta|formagg|grana|gorgonzola|provola|brie').hasMatch(n)) {
       return 'latticini';
@@ -151,10 +177,6 @@ class MenuCatalogImportService {
     }
     if (RegExp(r'salmone|tonno|gamber|pesce|acciug').hasMatch(n)) return 'pesce';
     if (RegExp(r'noci|pistacchi').hasMatch(n)) return 'frutta_secca';
-    if (RegExp(r'pizza|pinsa|calzone|margherita|marinara|diavola|bufalina').hasMatch(n)) {
-      return 'pizza';
-    }
-    if (RegExp(r'tiramisu|cheesecake|torta|tartufo|nutella').hasMatch(n)) return 'dolce';
     return 'custom';
   }
 
@@ -233,7 +255,7 @@ class MenuCatalogImportService {
     return recognized.text;
   }
 
-  /// Parser menu: estrae **nomi piatti** e ingredienti (non solo la riga Ingredienti).
+  /// Parser menu: estrae **nomi piatti** (con ricetta) e gli ingredienti.
   @visibleForTesting
   List<MenuImportCandidate> parseMenuText(String text) {
     final lines = text
@@ -245,18 +267,53 @@ class MenuCatalogImportService {
     final seen = <String>{};
     final out = <MenuImportCandidate>[];
     var skipSection = false;
+    var sectionCategory = 'custom';
 
-    void addName(String? name, {String? category}) {
+    void addName(
+      String? name, {
+      String? category,
+      String? recipe,
+      bool isDish = false,
+    }) {
       if (name == null) return;
       final key = name.toLowerCase();
-      if (!seen.add(key)) return;
+      if (!seen.add(key)) {
+        if (isDish || (recipe != null && recipe.isNotEmpty)) {
+          for (final item in out) {
+            if (item.name.toLowerCase() != key) continue;
+            if (isDish) item.isDish = true;
+            if (recipe != null && recipe.isNotEmpty) item.storageHint = recipe;
+            if (category != null) item.category = category;
+            item.recommendedDays = guessShelfDays(item.name);
+            break;
+          }
+        }
+        return;
+      }
+      final cat = category ?? guessCategory(name);
       out.add(
         MenuImportCandidate(
           name: name,
-          recommendedDays: guessShelfDays(name),
-          category: category ?? guessCategory(name),
+          recommendedDays: isDish ? 1 : guessShelfDays(name),
+          category: cat,
+          storageHint: (recipe != null && recipe.isNotEmpty) ? recipe : 'In frigo 0-4 °C',
+          isDish: isDish,
         ),
       );
+    }
+
+    String? sectionFromHeader(String line) {
+      final compact = line.toLowerCase().replaceAll(RegExp(r'[^a-zàèéìòù]'), '');
+      if (compact.contains('pins')) return 'pinsa';
+      if (compact.contains('impasto')) return 'impasto';
+      if (compact.contains('dolc') || compact.contains('dessert')) return 'dolce';
+      if (compact.contains('pizz') ||
+          compact.contains('classic') ||
+          compact.contains('special') ||
+          compact.contains('calzon')) {
+        return 'pizza';
+      }
+      return null;
     }
 
     bool isSkipSection(String line) {
@@ -268,36 +325,46 @@ class MenuCatalogImportService {
         'birre',
         'lenostrebirre',
         'birretradizionali',
-        'caffeamaridessert',
         'caffetteria',
       }.contains(compact);
     }
 
     for (var i = 0; i < lines.length; i++) {
       final raw = lines[i];
+      final section = sectionFromHeader(raw);
+      if (section != null) {
+        skipSection = false;
+        sectionCategory = section;
+        continue;
+      }
       if (isSkipSection(raw)) {
         skipSection = true;
         continue;
       }
       if (skipSection) {
-        // Riprende se torna una sezione cibo
-        final compact = raw.toLowerCase().replaceAll(RegExp(r'[^a-zàèéìòù]'), '');
-        if (_categoryHeaders.contains(compact) &&
-            !{'bevande', 'vini', 'vino', 'birre', 'extra'}.contains(compact)) {
-          skipSection = false;
-        } else {
-          continue;
-        }
+        continue;
       }
 
       final dish = _extractDishHeader(raw);
       if (dish != null) {
-        addName(dish, category: guessCategory(dish));
+        String? recipe;
         if (i + 1 < lines.length && _looksLikeIngredientLine(lines[i + 1])) {
-          for (final part in lines[i + 1].split(RegExp(r'[,;/•·]| e | ed '))) {
+          recipe = lines[i + 1];
+          for (final part in recipe.split(RegExp(r'[,;/•·]| e | ed '))) {
             addName(_extractDishName(part.trim()));
           }
         }
+        var dishName = dish;
+        final lowerDish = dishName.toLowerCase();
+        if (sectionCategory == 'pinsa' && !lowerDish.contains('pinsa')) {
+          dishName = 'Pinsa $dishName';
+        } else if (sectionCategory == 'pizza' &&
+            !RegExp(r'pizza|calzone|pinsa').hasMatch(lowerDish)) {
+          dishName = 'Pizza $dishName';
+        }
+        final guessed = guessCategory(dishName);
+        final cat = guessed == 'custom' ? sectionCategory : guessed;
+        addName(dishName, category: cat, recipe: recipe, isDish: true);
         if (out.length >= 220) break;
         continue;
       }
@@ -310,7 +377,7 @@ class MenuCatalogImportService {
       }
 
       final paren = RegExp(r'\(([^)]{3,})\)').firstMatch(raw);
-      if (paren != null) {
+      if (paren != null && raw.contains(',')) {
         for (final part in paren.group(1)!.split(RegExp(r'[,;/]| e | ed '))) {
           addName(_extractDishName(part.trim()));
         }
@@ -338,24 +405,29 @@ class MenuCatalogImportService {
       }
     }
 
+    out.sort((a, b) {
+      if (a.isDish == b.isDish) return 0;
+      return a.isDish ? -1 : 1;
+    });
     return out.take(220).toList();
   }
 
-  /// Riga tipo "MARGHERITA € 7,00" o "BERG A (BIANCA) 13,00"
+  /// Riga tipo "MARGHERITA € 7,00" o "BERGA (BIANCA) 13,00".
+  /// I prezzi italiani usano la virgola (`7,00`): va tolta prima di scartare le liste ingredienti.
   String? _extractDishHeader(String line) {
     var s = line.trim();
-    if (s.contains(',')) return null;
     final hasPrice = RegExp(r'€|\d+[.,]\d{2}').hasMatch(s);
-    if (!hasPrice) {
-      if (s.length < 4 || s.length > 42) return null;
-      if (s != s.toUpperCase()) return null;
-      if (s.split(' ').length > 6) return null;
-    }
     if (hasPrice) {
       s = s.replaceAll(RegExp(r'€\s*\d+[.,]?\d*'), ' ');
       s = s.replaceAll(RegExp(r'\d+[.,]\d{2}\s*€?'), ' ');
     }
     s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (s.contains(',')) return null;
+    if (!hasPrice) {
+      if (s.length < 4 || s.length > 42) return null;
+      if (s != s.toUpperCase()) return null;
+      if (s.split(' ').length > 6) return null;
+    }
     if (s.length < 3 || s.length > 50) return null;
     final lower = s.toLowerCase();
     if (_skipExact.contains(lower)) return null;

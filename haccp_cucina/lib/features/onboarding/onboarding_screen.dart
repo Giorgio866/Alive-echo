@@ -489,8 +489,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               builder: (ctx) => AlertDialog(
                 title: const Text('Catalogo di esempio?'),
                 content: const Text(
-                  'Puoi importare un catalogo di esempio (menu pizzeria) e poi modificarlo. '
-                  'Non e obbligatorio: meglio caricare i tuoi prodotti.',
+                  'Importa il menu Blue Eyes 2026 (pinse, pizze, dolci e ingredienti) già estratto dal PDF. '
+                  'Poi puoi modificarlo o togliere quello che non usi.',
                 ),
                 actions: [
                   TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
@@ -507,7 +507,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               }
             }
           },
-          child: const Text('Hai fretta? Importa catalogo di esempio'),
+          child: const Text('Hai fretta? Importa menu Blue Eyes 2026'),
         ),
       ],
     );

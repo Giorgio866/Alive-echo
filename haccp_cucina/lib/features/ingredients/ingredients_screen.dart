@@ -53,7 +53,7 @@ class _IngredientsScreenState extends ConsumerState<IngredientsScreen>
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
               child: Text(
-                'Qui inserisci gli ingredienti (foto menu/PDF o a mano). '
+                'Qui inserisci piatti e ingredienti (foto menu/PDF o a mano). '
                 'Poi tocca Preparo e stampa l\'etichetta.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
@@ -310,8 +310,42 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
     ref.invalidate(ingredientCatalogProvider);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${items.length} ingredienti aggiunti al catalogo')),
+        SnackBar(content: Text('${items.length} voci aggiunte al catalogo (piatti e ingredienti)')),
       );
+    }
+  }
+
+  Future<void> _importBlueEyesMenu() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Menu Blue Eyes 2026'),
+        content: const Text(
+          'Importa pinse, pizze, dolci e ingredienti estratti dal PDF del menu. '
+          'Se una voce esiste già viene aggiornata (ricetta e allergeni).',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annulla')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Importa')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _busy = true);
+    try {
+      final n = await ref.read(haccpRepositoryProvider).importOptionalBlueEyesCatalog();
+      ref.invalidate(ingredientCatalogProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Catalogo Blue Eyes 2026: $n voci')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import fallito: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -392,12 +426,13 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        'Passo 1 — inserisci gli ingredienti',
+                        'Passo 1 — inserisci piatti e ingredienti',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.tealDark),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         'Importa dal menu (foto/PDF) oppure aggiungi a mano. '
+                        'Vengono letti i nomi dei piatti e gli ingredienti. '
                         'Poi tocca Preparo → etichetta.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
                       ),
@@ -425,6 +460,11 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                             onPressed: _busy ? null : _addManualIngredient,
                             icon: const Icon(Icons.add, size: 18),
                             label: const Text('A mano'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : _importBlueEyesMenu,
+                            icon: const Icon(Icons.restaurant_menu_outlined, size: 18),
+                            label: const Text('Menu Blue Eyes 2026'),
                           ),
                         ],
                       ),
@@ -461,7 +501,7 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
                           'Scadenza consigliata: ${item.recommendedDays} gg · ${item.storageHint}'
                           '${item.allergens != null ? '\nAllergeni: ${item.allergens}' : ''}',
                         ),
-                        isThreeLine: item.allergens != null,
+                        isThreeLine: true,
                         trailing: FilledButton.tonal(
                           onPressed: () async {
                             final op = settings.value?.defaultOperator ?? 'Operatore';
@@ -599,6 +639,9 @@ class _CatalogTabState extends ConsumerState<_CatalogTab> {
       'uova' => 'Uova',
       'frutta_secca' => 'Frutta a guscio',
       'extra' => 'Extra',
+      'pinsa' => 'Pinse',
+      'pizza' => 'Pizze',
+      'dolce' => 'Dolci',
       _ => cat,
     };
   }
