@@ -35,7 +35,7 @@ class AppDatabase {
     final path = p.join(databasesPath, 'haccp_cucina.db');
     final db = await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);
@@ -50,6 +50,10 @@ class AppDatabase {
         if (oldVersion < 4) {
           // Rimuove catalogo Blue Eyes predefinito: ogni locale carica il proprio.
           await clearMenuCatalog(db);
+        }
+        if (oldVersion < 5) {
+          await _tryAddColumn(db, 'product_lots', 'depleted INTEGER NOT NULL DEFAULT 0');
+          await _tryAddColumn(db, 'product_lots', 'depleted_at TEXT');
         }
       },
     );
@@ -145,7 +149,9 @@ class AppDatabase {
         notes TEXT,
         opened INTEGER NOT NULL DEFAULT 0,
         opened_at TEXT,
-        use_by_after_open TEXT
+        use_by_after_open TEXT,
+        depleted INTEGER NOT NULL DEFAULT 0,
+        depleted_at TEXT
       )
     ''');
     await db.execute('''
@@ -282,7 +288,7 @@ class AppDatabase {
   static Future<Database> openInMemory() async {
     final db = await openDatabase(
       inMemoryDatabasePath,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);

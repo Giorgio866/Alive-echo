@@ -226,6 +226,8 @@ class HaccpRepository {
             opened: lot.opened,
             openedAt: lot.openedAt,
             useByAfterOpen: lot.useByAfterOpen,
+            depleted: lot.depleted,
+            depletedAt: lot.depletedAt,
           )
         : lot;
     await db.insert(
@@ -249,6 +251,14 @@ class HaccpRepository {
       useByAfterOpen: DateTime(now.year, now.month, now.day).add(Duration(days: daysUsable)),
     );
     return upsertLot(updated);
+  }
+
+  Future<ProductLot> markLotDepleted(ProductLot lot) async {
+    return upsertLot(lot.copyWith(depleted: true, depletedAt: DateTime.now()));
+  }
+
+  Future<ProductLot> restoreLot(ProductLot lot) async {
+    return upsertLot(lot.copyWith(clearDepleted: true));
   }
 
   // --- Documents ---
@@ -355,7 +365,7 @@ class HaccpRepository {
     final todayReadings = await getTodayReadings();
     final tasks = await getCleaningTasks();
     final doneToday = await getTaskIdsCompletedToday();
-    final lots = await getLots();
+    final lots = (await getLots()).where((l) => !l.depleted).toList();
     final docs = await getDocuments();
     final batches = await getPreparedBatches();
     final history = await getReadingsLastDays();

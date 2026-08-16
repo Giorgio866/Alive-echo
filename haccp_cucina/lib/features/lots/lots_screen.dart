@@ -11,11 +11,20 @@ import '../../services/vision_label_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
-class LotsScreen extends ConsumerWidget {
+class LotsScreen extends ConsumerStatefulWidget {
   const LotsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LotsScreen> createState() => _LotsScreenState();
+}
+
+enum _LotFilter { week, active, depleted }
+
+class _LotsScreenState extends ConsumerState<LotsScreen> {
+  _LotFilter _filter = _LotFilter.week;
+
+  @override
+  Widget build(BuildContext context) {
     final lotsAsync = ref.watch(lotsProvider);
 
     return Scaffold(
@@ -45,102 +54,205 @@ class LotsScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Errore: $e')),
         data: (lots) {
-          if (lots.isEmpty) {
-            return EmptyState(
-              icon: Icons.inventory_2_outlined,
-              title: 'Nessun lotto registrato',
-              message:
-                  'Fotografa l\'etichetta: l\'app estrae prodotto, lotto, scadenza, fornitore e allergeni.',
-              cta: FilledButton.icon(
-                onPressed: () => _openLotForm(context, ref, startWithScan: true),
-                icon: const Icon(Icons.document_scanner_outlined),
-                label: const Text('Scansiona etichetta'),
-              ),
-            );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 140),
-            itemCount: lots.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final lot = lots[index];
-              final tone = lot.isExpired
-                  ? StatusTone.danger
-                  : lot.expiresSoon
-                      ? StatusTone.warn
-                      : StatusTone.ok;
-              final status = lot.isExpired
-                  ? 'Scaduto'
-                  : lot.expiresSoon
-                      ? 'In scadenza'
-                      : lot.opened
-                          ? 'Aperto'
-                          : 'OK';
-              final fmt = DateFormat('dd/MM/yyyy');
-              return Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.slate.withValues(alpha: 0.08)),
-                ),
+          final week = lots.where((l) => !l.depleted && l.receivedThisWeek).toList();
+          final active = lots.where((l) => !l.depleted).toList();
+          final depleted = lots.where((l) => l.depleted).toList();
+          final visible = switch (_filter) {
+            _LotFilter.week => week,
+            _LotFilter.active => active,
+            _LotFilter.depleted => depleted,
+          };
+
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(lot.productName, style: Theme.of(context).textTheme.titleMedium),
-                        ),
-                        StatusBadge(label: status, tone: tone),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text('Lotto ${lot.lotCode} · ${lot.supplier}'),
                     Text(
-                      '${lot.storageLocation}'
-                      '${lot.effectiveExpiry != null ? ' · scad. ${fmt.format(lot.effectiveExpiry!)}' : ''}'
-                      '${lot.allergens != null && lot.allergens!.isNotEmpty ? ' · allergeni: ${lot.allergens}' : ''}',
+                      'Ordine a settimana: registra i lotti all\'arrivo, poi Esaurito quando finiscono. '
+                      'Restano in archivio.',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
+                      spacing: 8,
                       children: [
-                        FilledButton.tonalIcon(
-                          onPressed: () => _printLotLabel(context, ref, lot),
-                          icon: const Icon(Icons.print, size: 18),
-                          label: const Text('Stampa etichetta'),
+                        ChoiceChip(
+                          label: Text('Settimana (${week.length})'),
+                          selected: _filter == _LotFilter.week,
+                          onSelected: (_) => setState(() => _filter = _LotFilter.week),
                         ),
-                        if (!lot.opened)
-                          TextButton.icon(
-                            onPressed: () async {
-                              await ref.read(haccpRepositoryProvider).markLotOpened(lot);
-                              ref.invalidate(lotsProvider);
-                              ref.invalidate(dashboardProvider);
-                            },
-                            icon: const Icon(Icons.lock_open, size: 18),
-                            label: const Text('Segna aperto'),
-                          ),
-                        IconButton(
-                          tooltip: 'Elimina',
-                          onPressed: () async {
-                            await ref.read(expiryNotificationServiceProvider).cancelLot(lot.id);
-                            await ref.read(haccpRepositoryProvider).deleteLot(lot.id);
-                            ref.invalidate(lotsProvider);
-                            ref.invalidate(dashboardProvider);
-                          },
-                          icon: const Icon(Icons.delete_outline),
+                        ChoiceChip(
+                          label: Text('Attivi (${active.length})'),
+                          selected: _filter == _LotFilter.active,
+                          onSelected: (_) => setState(() => _filter = _LotFilter.active),
+                        ),
+                        ChoiceChip(
+                          label: Text('Esauriti (${depleted.length})'),
+                          selected: _filter == _LotFilter.depleted,
+                          onSelected: (_) => setState(() => _filter = _LotFilter.depleted),
                         ),
                       ],
                     ),
                   ],
                 ),
-              );
-            },
+              ),
+              Expanded(
+                child: visible.isEmpty
+                    ? EmptyState(
+                        icon: Icons.inventory_2_outlined,
+                        title: _filter == _LotFilter.depleted
+                            ? 'Nessun lotto esaurito'
+                            : 'Nessun lotto in questa vista',
+                        message: _filter == _LotFilter.week
+                            ? 'Fotografa le etichette dei prodotti arrivati con l\'ordine di questa settimana.'
+                            : 'Fotografa l\'etichetta: l\'app estrae prodotto, lotto, scadenza, fornitore e allergeni.',
+                        cta: FilledButton.icon(
+                          onPressed: () => _openLotForm(context, ref, startWithScan: true),
+                          icon: const Icon(Icons.document_scanner_outlined),
+                          label: const Text('Scansiona etichetta'),
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 140),
+                        itemCount: visible.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) => _LotCard(lot: visible[index]),
+                      ),
+              ),
+            ],
           );
         },
+      ),
+    );
+  }
+
+  Future<void> _openLotForm(
+    BuildContext context,
+    WidgetRef ref, {
+    bool startWithScan = false,
+  }) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => _LotFormSheet(startWithScan: startWithScan),
+    );
+  }
+}
+
+class _LotCard extends ConsumerWidget {
+  const _LotCard({required this.lot});
+
+  final ProductLot lot;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tone = lot.depleted
+        ? StatusTone.neutral
+        : lot.isExpired
+            ? StatusTone.danger
+            : lot.expiresSoon
+                ? StatusTone.warn
+                : StatusTone.ok;
+    final status = lot.depleted
+        ? 'Esaurito'
+        : lot.isExpired
+            ? 'Scaduto'
+            : lot.expiresSoon
+                ? 'In scadenza'
+                : lot.opened
+                    ? 'Aperto'
+                    : 'OK';
+    final fmt = DateFormat('dd/MM/yyyy');
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.slate.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(lot.productName, style: Theme.of(context).textTheme.titleMedium),
+              ),
+              StatusBadge(label: status, tone: tone),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('Lotto ${lot.lotCode} · ${lot.supplier}'),
+          Text(
+            '${lot.storageLocation}'
+            '${lot.effectiveExpiry != null ? ' · scad. ${fmt.format(lot.effectiveExpiry!)}' : ''}'
+            '${lot.allergens != null && lot.allergens!.isNotEmpty ? ' · allergeni: ${lot.allergens}' : ''}',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: () => _printLotLabel(context, ref, lot),
+                icon: const Icon(Icons.print, size: 18),
+                label: const Text('Stampa etichetta'),
+              ),
+              if (!lot.opened && !lot.depleted)
+                TextButton.icon(
+                  onPressed: () async {
+                    await ref.read(haccpRepositoryProvider).markLotOpened(lot);
+                    ref.invalidate(lotsProvider);
+                    ref.invalidate(dashboardProvider);
+                  },
+                  icon: const Icon(Icons.lock_open, size: 18),
+                  label: const Text('Segna aperto'),
+                ),
+              if (!lot.depleted)
+                TextButton.icon(
+                  onPressed: () async {
+                    await ref.read(expiryNotificationServiceProvider).cancelLot(lot.id);
+                    await ref.read(haccpRepositoryProvider).markLotDepleted(lot);
+                    ref.invalidate(lotsProvider);
+                    ref.invalidate(dashboardProvider);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('${lot.productName} segnato esaurito')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: const Text('Esaurito'),
+                )
+              else
+                TextButton.icon(
+                  onPressed: () async {
+                    await ref.read(haccpRepositoryProvider).restoreLot(lot);
+                    await ref.read(expiryNotificationServiceProvider).scheduleLotExpiry(lot.copyWith(clearDepleted: true));
+                    ref.invalidate(lotsProvider);
+                    ref.invalidate(dashboardProvider);
+                  },
+                  icon: const Icon(Icons.undo, size: 18),
+                  label: const Text('Ripristina'),
+                ),
+              IconButton(
+                tooltip: 'Elimina',
+                onPressed: () async {
+                  await ref.read(expiryNotificationServiceProvider).cancelLot(lot.id);
+                  await ref.read(haccpRepositoryProvider).deleteLot(lot.id);
+                  ref.invalidate(lotsProvider);
+                  ref.invalidate(dashboardProvider);
+                },
+                icon: const Icon(Icons.delete_outline),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -160,19 +272,6 @@ class LotsScreen extends ConsumerWidget {
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
-  }
-
-  Future<void> _openLotForm(
-    BuildContext context,
-    WidgetRef ref, {
-    bool startWithScan = false,
-  }) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => _LotFormSheet(startWithScan: startWithScan),
-    );
   }
 }
 

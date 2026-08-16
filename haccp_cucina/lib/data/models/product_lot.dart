@@ -13,6 +13,9 @@ class ProductLot {
   final bool opened;
   final DateTime? openedAt;
   final DateTime? useByAfterOpen;
+  /// Lotto finito in settimana: resta in archivio, esce dalla lista attiva.
+  final bool depleted;
+  final DateTime? depletedAt;
 
   const ProductLot({
     required this.id,
@@ -29,7 +32,16 @@ class ProductLot {
     this.opened = false,
     this.openedAt,
     this.useByAfterOpen,
+    this.depleted = false,
+    this.depletedAt,
   });
+
+  bool get receivedThisWeek {
+    final now = DateTime.now();
+    final start = now.subtract(Duration(days: now.weekday - 1));
+    final weekStart = DateTime(start.year, start.month, start.day);
+    return !receivedAt.isBefore(weekStart);
+  }
 
   bool get isExpired {
     final limit = effectiveExpiry;
@@ -67,6 +79,8 @@ class ProductLot {
         'opened': opened ? 1 : 0,
         'opened_at': openedAt?.toIso8601String(),
         'use_by_after_open': useByAfterOpen?.toIso8601String(),
+        'depleted': depleted ? 1 : 0,
+        'depleted_at': depletedAt?.toIso8601String(),
       };
 
   factory ProductLot.fromMap(Map<String, Object?> map) => ProductLot(
@@ -90,6 +104,10 @@ class ProductLot {
         useByAfterOpen: map['use_by_after_open'] != null
             ? DateTime.parse(map['use_by_after_open']! as String)
             : null,
+        depleted: (map['depleted'] as int? ?? 0) == 1,
+        depletedAt: map['depleted_at'] != null
+            ? DateTime.parse(map['depleted_at']! as String)
+            : null,
       );
 
   ProductLot copyWith({
@@ -106,6 +124,9 @@ class ProductLot {
     bool? opened,
     DateTime? openedAt,
     DateTime? useByAfterOpen,
+    bool? depleted,
+    DateTime? depletedAt,
+    bool clearDepleted = false,
   }) =>
       ProductLot(
         id: id,
@@ -122,5 +143,7 @@ class ProductLot {
         opened: opened ?? this.opened,
         openedAt: openedAt ?? this.openedAt,
         useByAfterOpen: useByAfterOpen ?? this.useByAfterOpen,
+        depleted: clearDepleted ? false : (depleted ?? this.depleted),
+        depletedAt: clearDepleted ? null : (depletedAt ?? this.depletedAt),
       );
 }

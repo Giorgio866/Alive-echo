@@ -102,6 +102,25 @@ void main() {
       expect(opened.useByAfterOpen, isNotNull);
     });
 
+    test('lotto esaurito resta in archivio e si ripristina', () async {
+      final lot = await repo.upsertLot(
+        ProductLot(
+          id: 'lot-dep',
+          productName: 'Tastasal',
+          lotCode: 'L607',
+          supplier: 'Fornitore',
+          receivedAt: DateTime.now(),
+          storageLocation: 'Frigo',
+        ),
+      );
+      final done = await repo.markLotDepleted(lot);
+      expect(done.depleted, isTrue);
+      expect(done.depletedAt, isNotNull);
+      final restored = await repo.restoreLot(done);
+      expect(restored.depleted, isFalse);
+      expect(restored.depletedAt, isNull);
+    });
+
     test('dashboard snapshot aggrega alert', () async {
       final snap = await repo.getDashboardSnapshot();
       expect(snap.temperaturePoints, greaterThan(0));
