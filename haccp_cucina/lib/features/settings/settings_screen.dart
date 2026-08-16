@@ -77,6 +77,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.dispose();
   }
 
+  Future<void> _savePrinterLanguage() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final current = await ref.read(settingsServiceProvider).load();
+    final updated = current.copyWith(
+      printerLanguage: _mode == 'network' ? 'escpos' : _printerLanguage,
+      labelFormat: _labelFormat,
+    );
+    await ref.read(settingsServiceProvider).save(updated);
+    ref.invalidate(settingsProvider);
+    if (!mounted) return;
+    setState(() {
+      _printerSummary = updated.hasPrinterConfigured ? _describe(updated) : _printerSummary;
+    });
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          updated.usesTspl
+              ? 'Modalità TSPL/CLABEL salvata (${updated.labelFormat})'
+              : 'Modalità ESC/POS salvata',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onLanguageChanged(String lang) async {
+    setState(() => _printerLanguage = lang);
+    final current = await ref.read(settingsServiceProvider).load();
+    if (!current.hasPrinterConfigured) return;
+    await _savePrinterLanguage();
+  }
+
+  Future<void> _onLabelFormatChanged(String format) async {
+    setState(() => _labelFormat = format);
+    final current = await ref.read(settingsServiceProvider).load();
+    if (!current.hasPrinterConfigured || _printerLanguage != 'tspl') return;
+    await _savePrinterLanguage();
+  }
+
   Future<void> _clearPrinter() async {
     final printer = ref.read(thermalPrintServiceProvider);
     await printer.disconnectBluetooth();
@@ -191,8 +229,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Text('Stampante etichette', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 6),
           Text(
-            'Bluetooth: ESC/POS (scontrino) oppure CLABEL/TSPL (etichette adesive 40×30 / 50×30 / 50×80). '
-            'WiFi/rete: solo ESC/POS (porta 9100).',
+            'Scegli tu: ESC/POS (stampanti scontrino) oppure TSPL/CLABEL (etichette adesive). '
+            'Puoi cambiare in qualsiasi momento.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
           ),
           const SizedBox(height: 12),
@@ -211,6 +249,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 onPressed: _clearPrinter,
               ),
             ),
+          const SizedBox(height: 8),
+          Text('Connessione', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           SegmentedButton<String>(
             segments: const [
@@ -231,46 +271,61 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               if (_mode == 'network') _printerLanguage = 'escpos';
             }),
           ),
-          if (_mode == 'bluetooth') ...[
-            const SizedBox(height: 16),
-            Text('Linguaggio stampante', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(
-                  value: 'escpos',
-                  label: Text('ESC/POS'),
-                  icon: Icon(Icons.receipt_long),
-                ),
-                ButtonSegment(
-                  value: 'tspl',
-                  label: Text('CLABEL'),
-                  icon: Icon(Icons.label_outline),
-                ),
-              ],
-              selected: {_printerLanguage},
-              onSelectionChanged: (v) => setState(() => _printerLanguage = v.first),
-            ),
-            if (_printerLanguage == 'tspl') ...[
-              const SizedBox(height: 12),
-              Text('Formato etichetta', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _labelFormat,
-                decoration: const InputDecoration(
-                  labelText: 'Misura rotolo',
-                  helperText: 'Allinea al rotolo caricato (CLABEL 221B)',
-                ),
-                items: const [
-                  DropdownMenuItem(value: '40x30', child: Text('40 × 30 mm')),
-                  DropdownMenuItem(value: '50x30', child: Text('50 × 30 mm')),
-                  DropdownMenuItem(value: '50x80', child: Text('50 × 80 mm')),
-                ],
-                onChanged: (v) {
-                  if (v != null) setState(() => _labelFormat = v);
-                },
+          const SizedBox(height: 16),
+          Text('Tipo comandi (scegli tu)', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            _mode == 'network'
+                ? 'In WiFi/rete è disponibile solo ESC/POS.'
+                : 'ESC/POS = scontrino 58 mm · TSPL = CLABEL / etichette adesive',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: [
+              const ButtonSegment(
+                value: 'escpos',
+                label: Text('ESC/POS'),
+                icon: Icon(Icons.receipt_long),
+              ),
+              ButtonSegment(
+                value: 'tspl',
+                label: const Text('TSPL'),
+                icon: const Icon(Icons.label_outline),
+                enabled: _mode == 'bluetooth',
               ),
             ],
+            selected: {_printerLanguage},
+            onSelectionChanged: (v) => _onLanguageChanged(v.first),
+          ),
+          if (_mode == 'bluetooth' && _printerLanguage == 'tspl') ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _labelFormat,
+              decoration: const InputDecoration(
+                labelText: 'Formato etichetta CLABEL',
+                helperText: '40×30 / 50×30 / 50×80 mm',
+              ),
+              items: const [
+                DropdownMenuItem(value: '40x30', child: Text('40 × 30 mm')),
+                DropdownMenuItem(value: '50x30', child: Text('50 × 30 mm')),
+                DropdownMenuItem(value: '50x80', child: Text('50 × 80 mm')),
+              ],
+              onChanged: (v) {
+                if (v != null) _onLabelFormatChanged(v);
+              },
+            ),
+          ],
+          if (_mode == 'bluetooth') ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _savePrinterLanguage,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Salva tipo comandi'),
+              ),
+            ),
           ],
           const SizedBox(height: 16),
           if (_mode == 'network') ...[
