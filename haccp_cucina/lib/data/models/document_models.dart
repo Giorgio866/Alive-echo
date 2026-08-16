@@ -74,6 +74,10 @@ class AppSettings {
   final String? printerName;
   /// Porta TCP per stampanti di rete / bridge (default 9100).
   final int? printerPort;
+  /// `escpos` (scontrino) | `tspl` (etichette CLABEL/TSC).
+  final String printerLanguage;
+  /// Formato etichetta TSPL: `40x30` | `50x30` | `50x80`.
+  final String labelFormat;
   final bool onboardingCompleted;
 
   const AppSettings({
@@ -83,6 +87,8 @@ class AppSettings {
     this.printerAddress,
     this.printerName,
     this.printerPort,
+    this.printerLanguage = 'escpos',
+    this.labelFormat = '50x30',
     this.onboardingCompleted = false,
   });
 
@@ -91,6 +97,8 @@ class AppSettings {
       printerAddress!.trim().isNotEmpty &&
       (printerMode == 'bluetooth' || printerMode == 'network');
 
+  bool get usesTspl => printerLanguage == 'tspl';
+
   AppSettings copyWith({
     String? activityName,
     String? defaultOperator,
@@ -98,6 +106,8 @@ class AppSettings {
     String? printerAddress,
     String? printerName,
     int? printerPort,
+    String? printerLanguage,
+    String? labelFormat,
     bool? onboardingCompleted,
     bool clearPrinter = false,
   }) =>
@@ -108,6 +118,8 @@ class AppSettings {
         printerAddress: clearPrinter ? null : (printerAddress ?? this.printerAddress),
         printerName: clearPrinter ? null : (printerName ?? this.printerName),
         printerPort: clearPrinter ? null : (printerPort ?? this.printerPort),
+        printerLanguage: printerLanguage ?? this.printerLanguage,
+        labelFormat: labelFormat ?? this.labelFormat,
         onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
       );
 
@@ -118,6 +130,8 @@ class AppSettings {
         'printer_address': printerAddress,
         'printer_name': printerName,
         'printer_port': printerPort?.toString(),
+        'printer_language': printerLanguage,
+        'label_format': labelFormat,
         'onboarding_completed': onboardingCompleted ? '1' : '0',
       };
 
@@ -129,6 +143,8 @@ class AppSettings {
         (prefs['printer_address'] != null && prefs['printer_address']!.isNotEmpty
             ? 'bluetooth'
             : null);
+    final lang = prefs['printer_language'];
+    final format = prefs['label_format'];
     return AppSettings(
       activityName: prefs['activity_name'] ?? 'Pizzeria / Cucina',
       defaultOperator: prefs['default_operator'] ?? 'Operatore',
@@ -136,6 +152,10 @@ class AppSettings {
       printerAddress: prefs['printer_address'],
       printerName: prefs['printer_name'],
       printerPort: port,
+      printerLanguage: (lang == 'tspl') ? 'tspl' : 'escpos',
+      labelFormat: (format == '40x30' || format == '50x30' || format == '50x80')
+          ? format!
+          : '50x30',
       onboardingCompleted: prefs['onboarding_completed'] == '1',
     );
   }

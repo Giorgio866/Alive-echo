@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
@@ -18,17 +19,46 @@ class ThermalPrinterDevice {
   const ThermalPrinterDevice({required this.name, required this.address});
 }
 
+class LabelSizeMm {
+  final int widthMm;
+  final int heightMm;
+  final String id;
+
+  const LabelSizeMm(this.id, this.widthMm, this.heightMm);
+
+  static const fortyByThirty = LabelSizeMm('40x30', 40, 30);
+  static const fiftyByThirty = LabelSizeMm('50x30', 50, 30);
+  static const fiftyByEighty = LabelSizeMm('50x80', 50, 80);
+
+  static LabelSizeMm fromId(String? id) {
+    switch (id) {
+      case '40x30':
+        return fortyByThirty;
+      case '50x80':
+        return fiftyByEighty;
+      case '50x30':
+      default:
+        return fiftyByThirty;
+    }
+  }
+}
+
 class PrinterTarget {
   final PrinterConnectionType type;
   final String address;
   final int port;
   final String? name;
+  /// `escpos` | `tspl`
+  final String language;
+  final LabelSizeMm labelSize;
 
   const PrinterTarget({
     required this.type,
     required this.address,
     this.port = 9100,
     this.name,
+    this.language = 'escpos',
+    this.labelSize = LabelSizeMm.fiftyByThirty,
   });
 
   String get displayLabel {
@@ -37,6 +67,8 @@ class PrinterTarget {
     if (type == PrinterConnectionType.network) return '$address:$port';
     return address;
   }
+
+  bool get usesTspl => language == 'tspl';
 
   factory PrinterTarget.fromSettings(AppSettings s) {
     final mode = s.printerMode;
@@ -49,11 +81,15 @@ class PrinterTarget {
       address: address,
       port: s.printerPort ?? 9100,
       name: s.printerName,
+      language: s.printerLanguage,
+      labelSize: LabelSizeMm.fromId(s.labelFormat),
     );
   }
 }
 
-/// Stampa etichette ESC/POS via Bluetooth oppure rete WiFi/LAN (TCP raw, tipicamente porta 9100).
+/// Stampa etichette:
+/// - ESC/POS via Bluetooth o rete (scontrini 58 mm)
+/// - TSPL via Bluetooth (etichette CLABEL / TSC, es. 40x30 / 50x30 / 50x80)
 class ThermalPrintService {
   ThermalPrintService({SettingsService? settings}) : _settings = settings ?? SettingsService();
 
@@ -148,7 +184,19 @@ class ThermalPrintService {
     }
   }
 
-  Future<Uint8List> buildLabelBytes(LabelDraft draft, {String activityName = 'HACCP'}) async {
+  Future<Uint8List> buildLabelBytes(
+    LabelDraft draft, {
+    String activityName = 'HACCP',
+    String language = 'escpos',
+    LabelSizeMm labelSize = LabelSizeMm.fiftyByThirty,
+  }) async {
+    if (language == 'tspl') {
+      return buildTsplLabelBytes(draft, activityName: activityName, labelSize: labelSize);
+    }
+    return _buildEscPosLabelBytes(draft, activityName: activityName);
+  }
+
+  Future<Uint8List> _buildEscPosLabelBytes(LabelDraft draft, {required String activityName}) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
     final bytes = <int>[];
@@ -193,6 +241,88 @@ class ThermalPrintService {
     return Uint8List.fromList(bytes);
   }
 
+  /// Comandi TSPL/TSPL2 per stampanti etichette (CLABEL 221B e simili).
+  /// Inviabili via Bluetooth SPP come byte grezzi (stesso canale di ESC/POS).
+  Uint8List buildTsplLabelBytes(
+    LabelDraft draft, {
+    String activityName = 'HACCP',
+    LabelSizeMm labelSize = LabelSizeMm.fiftyByThirty,
+  }) {
+    final lot = (draft.lotCode ?? '').trim().isEmpty ? 'N/D' : draft.lotCode!.trim();
+    final w = labelSize.widthMm;
+    final h = labelSize.heightMm;
+    // 203 dpi ≈ 8 dots/mm
+    final maxChars = (w <= 40) ? 18 : 22;
+    final compact = h <= 30;
+
+    final lines = <String>[
+      _clip(_asciiSafe(activityName.toUpperCase()), maxChars),
+      _clip(_asciiSafe(draft.productName), maxChars),
+      _clip('LOTTO: ${_asciiSafe(lot)}', maxChars),
+      _clip('Prep ${_dateFmt.format(draft.preparedAt)}', maxChars),
+      _clip('Scad ${_dayFmt.format(draft.useBy)}', maxChars),
+    ];
+    if (!compact && draft.allergens != null && draft.allergens!.trim().isNotEmpty) {
+      lines.add(_clip('All ${_asciiSafe(draft.allergens!)}', maxChars));
+    }
+    if (!compact && draft.operatorName != null && draft.operatorName!.trim().isNotEmpty) {
+      lines.add(_clip('Op ${_asciiSafe(draft.operatorName!)}', maxChars));
+    }
+
+    // Passo verticale in dots: font "2" ~20px, lascia margine.
+    final step = compact ? 28 : 36;
+    var y = 12;
+    final buf = StringBuffer()
+      ..writeln('SIZE $w mm,$h mm')
+      ..writeln('GAP 2 mm,0 mm')
+      ..writeln('DIRECTION 1')
+      ..writeln('REFERENCE 0,0')
+      ..writeln('CLS')
+      ..writeln('CODEPAGE 1252');
+
+    for (var i = 0; i < lines.length; i++) {
+      final font = i <= 1 ? '3' : '2';
+      final mul = (i == 1 && !compact) ? 1 : 1;
+      buf.writeln('TEXT 16,$y,"$font",0,$mul,$mul,"${_tsplEscape(lines[i])}"');
+      y += step;
+      if (y > (h * 8) - 24) break;
+    }
+    buf.writeln('PRINT 1,1');
+    return Uint8List.fromList(ascii.encode(buf.toString()));
+  }
+
+  static String _tsplEscape(String s) => s.replaceAll('"', "'").replaceAll('\r', ' ').replaceAll('\n', ' ');
+
+  static String _clip(String s, int max) {
+    final t = s.trim();
+    if (t.length <= max) return t;
+    return '${t.substring(0, max - 1)}.';
+  }
+
+  /// Evita caratteri non supportati dai font bitmap TSPL economici.
+  static String _asciiSafe(String input) {
+    const map = {
+      'à': 'a', 'á': 'a', 'â': 'a', 'ä': 'a', 'ã': 'a',
+      'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+      'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+      'ò': 'o', 'ó': 'o', 'ô': 'o', 'ö': 'o', 'õ': 'o',
+      'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+      'À': 'A', 'Á': 'A', 'Â': 'A', 'Ä': 'A',
+      'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+      'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',
+      'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Ö': 'O',
+      'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',
+      'ç': 'c', 'Ç': 'C', 'ñ': 'n', 'Ñ': 'N',
+      '°': 'o', '€': 'EUR', '•': '-', '–': '-', '—': '-',
+    };
+    final buf = StringBuffer();
+    for (final rune in input.runes) {
+      final ch = String.fromCharCode(rune);
+      buf.write(map[ch] ?? (rune < 128 ? ch : '?'));
+    }
+    return buf.toString();
+  }
+
   Future<String> previewText(LabelDraft draft, {String activityName = 'HACCP'}) async {
     final lot = (draft.lotCode ?? '').trim().isEmpty ? 'N/D' : draft.lotCode!.trim();
     final buf = StringBuffer()
@@ -224,10 +354,21 @@ class ThermalPrintService {
       throw UnsupportedError('Stampa non disponibile sul web.');
     }
     final resolved = target ?? PrinterTarget.fromSettings(await _settings.load());
-    final bytes = await buildLabelBytes(draft, activityName: activityName);
+    final bytes = await buildLabelBytes(
+      draft,
+      activityName: activityName,
+      language: resolved.language,
+      labelSize: resolved.labelSize,
+    );
 
     for (var i = 0; i < draft.copies; i++) {
       if (resolved.type == PrinterConnectionType.network) {
+        if (resolved.usesTspl) {
+          throw StateError(
+            'CLABEL/TSPL è supportata via Bluetooth. '
+            'Per la rete usa una stampante ESC/POS oppure collega la CLABEL in Bluetooth.',
+          );
+        }
         await _printViaNetwork(resolved.address, resolved.port, bytes);
       } else {
         await _printViaBluetooth(resolved.address, bytes);

@@ -28,6 +28,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   VisionDownloadProgress? _visionProgress;
   String? _printerSummary;
   String _mode = 'network'; // bluetooth | network
+  String _printerLanguage = 'escpos'; // escpos | tspl
+  String _labelFormat = '50x30'; // 40x30 | 50x30 | 50x80
 
   @override
   void initState() {
@@ -47,6 +49,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _portCtrl.text = '${s.printerPort ?? 9100}';
       if (s.printerName != null) _networkNameCtrl.text = s.printerName!;
     }
+    _printerLanguage = s.printerLanguage;
+    _labelFormat = s.labelFormat;
     setState(() {
       _printerSummary = s.hasPrinterConfigured
           ? _describe(s)
@@ -55,11 +59,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   String _describe(AppSettings s) {
+    final lang = s.usesTspl ? 'CLABEL/TSPL ${s.labelFormat}' : 'ESC/POS';
     if (s.printerMode == 'network') {
       final name = s.printerName ?? 'Rete';
-      return '$name · ${s.printerAddress}:${s.printerPort ?? 9100}';
+      return '$name · ${s.printerAddress}:${s.printerPort ?? 9100} · $lang';
     }
-    return '${s.printerName ?? 'Bluetooth'} · ${s.printerAddress}';
+    return '${s.printerName ?? 'Bluetooth'} · ${s.printerAddress} · $lang';
   }
 
   @override
@@ -109,6 +114,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         printerAddress: host,
         printerPort: port,
         printerName: name,
+        printerLanguage: 'escpos',
       );
       await ref.read(settingsServiceProvider).save(updated);
       ref.invalidate(settingsProvider);
@@ -185,7 +191,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Text('Stampante etichette', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 6),
           Text(
-            'Scegli Bluetooth oppure WiFi/rete ESC/POS (IP + porta, anche tramite bridge Android).',
+            'Bluetooth: ESC/POS (scontrino) oppure CLABEL/TSPL (etichette adesive 40×30 / 50×30 / 50×80). '
+            'WiFi/rete: solo ESC/POS (porta 9100).',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
           ),
           const SizedBox(height: 12),
@@ -219,8 +226,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ],
             selected: {_mode},
-            onSelectionChanged: (v) => setState(() => _mode = v.first),
+            onSelectionChanged: (v) => setState(() {
+              _mode = v.first;
+              if (_mode == 'network') _printerLanguage = 'escpos';
+            }),
           ),
+          if (_mode == 'bluetooth') ...[
+            const SizedBox(height: 16),
+            Text('Linguaggio stampante', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'escpos',
+                  label: Text('ESC/POS'),
+                  icon: Icon(Icons.receipt_long),
+                ),
+                ButtonSegment(
+                  value: 'tspl',
+                  label: Text('CLABEL'),
+                  icon: Icon(Icons.label_outline),
+                ),
+              ],
+              selected: {_printerLanguage},
+              onSelectionChanged: (v) => setState(() => _printerLanguage = v.first),
+            ),
+            if (_printerLanguage == 'tspl') ...[
+              const SizedBox(height: 12),
+              Text('Formato etichetta', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: _labelFormat,
+                decoration: const InputDecoration(
+                  labelText: 'Misura rotolo',
+                  helperText: 'Allinea al rotolo caricato (CLABEL 221B)',
+                ),
+                items: const [
+                  DropdownMenuItem(value: '40x30', child: Text('40 × 30 mm')),
+                  DropdownMenuItem(value: '50x30', child: Text('50 × 30 mm')),
+                  DropdownMenuItem(value: '50x80', child: Text('50 × 80 mm')),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _labelFormat = v);
+                },
+              ),
+            ],
+          ],
           const SizedBox(height: 16),
           if (_mode == 'network') ...[
             TextField(
@@ -279,7 +330,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ] else ...[
             Text(
               printer.isSupported
-                  ? 'Usa una stampante ESC/POS già accoppiata in Impostazioni Bluetooth Android.'
+                  ? (_printerLanguage == 'tspl'
+                      ? 'Accoppia la CLABEL in Bluetooth Android, poi selezionala qui. Linguaggio: TSPL.'
+                      : 'Usa una stampante ESC/POS già accoppiata in Impostazioni Bluetooth Android.')
                   : 'Bluetooth disponibile sull\'app Android.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
             ),
@@ -328,32 +381,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   try {
                     await printer.connectBluetooth(d);
                     final current = await ref.read(settingsServiceProvider).load();
-                    final updated = current.copyWith(
+                    final updated = AppSettings(
+                      activityName: current.activityName,
+                      defaultOperator: current.defaultOperator,
+                      onboardingCompleted: current.onboardingCompleted,
                       printerMode: 'bluetooth',
                       printerName: d.name,
                       printerAddress: d.address,
                       printerPort: null,
+                      printerLanguage: _printerLanguage,
+                      labelFormat: _labelFormat,
                     );
-                    // clear port explicitly
-                    await ref.read(settingsServiceProvider).save(
-                          AppSettings(
-                            activityName: updated.activityName,
-                            defaultOperator: updated.defaultOperator,
-                            onboardingCompleted: updated.onboardingCompleted,
-                            printerMode: 'bluetooth',
-                            printerName: d.name,
-                            printerAddress: d.address,
-                            printerPort: null,
-                          ),
-                        );
+                    await ref.read(settingsServiceProvider).save(updated);
                     ref.invalidate(settingsProvider);
                     setState(() {
                       _mode = 'bluetooth';
-                      _printerSummary = '${d.name} · ${d.address}';
+                      _printerSummary = _describe(updated);
                     });
                     if (!mounted) return;
                     messenger.showSnackBar(
-                      SnackBar(content: Text('Connessa a ${d.name}')),
+                      SnackBar(
+                        content: Text(
+                          _printerLanguage == 'tspl'
+                              ? 'CLABEL collegata (${d.name}) · $_labelFormat'
+                              : 'Connessa a ${d.name} (ESC/POS)',
+                        ),
+                      ),
                     );
                   } catch (e) {
                     if (!mounted) return;

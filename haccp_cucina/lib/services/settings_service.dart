@@ -12,6 +12,8 @@ class SettingsService {
       'printer_address': prefs.getString('printer_address'),
       'printer_name': prefs.getString('printer_name'),
       'printer_port': prefs.getString('printer_port'),
+      'printer_language': prefs.getString('printer_language'),
+      'label_format': prefs.getString('label_format'),
       'onboarding_completed': prefs.getString('onboarding_completed'),
     });
   }
@@ -24,6 +26,8 @@ class SettingsService {
       'onboarding_completed',
       settings.onboardingCompleted ? '1' : '0',
     );
+    await prefs.setString('printer_language', settings.printerLanguage);
+    await prefs.setString('label_format', settings.labelFormat);
 
     if (settings.printerMode != null) {
       await prefs.setString('printer_mode', settings.printerMode!);
