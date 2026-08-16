@@ -8,6 +8,7 @@ import '../data/models/temperature_models.dart';
 import '../data/repositories/haccp_repository.dart';
 import '../services/document_scan_service.dart';
 import '../services/expiry_notification_service.dart';
+import '../services/home_assistant_service.dart';
 import '../services/lot_label_ocr_service.dart';
 import '../services/menu_catalog_import_service.dart';
 import '../services/monthly_archive_service.dart';
@@ -28,6 +29,10 @@ final documentScanServiceProvider = Provider<DocumentScanService>((ref) {
 
 final thermalPrintServiceProvider = Provider<ThermalPrintService>((ref) {
   return ThermalPrintService(settings: ref.watch(settingsServiceProvider));
+});
+
+final homeAssistantServiceProvider = Provider<HomeAssistantService>((ref) {
+  return HomeAssistantService();
 });
 
 final settingsServiceProvider = Provider<SettingsService>((ref) {

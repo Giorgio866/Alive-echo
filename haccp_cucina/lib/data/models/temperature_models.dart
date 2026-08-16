@@ -6,6 +6,8 @@ class TemperaturePoint {
   final double maxC;
   final bool active;
   final String? photoPath;
+  /// Entity Home Assistant, es. `sensor.frigo_1_temperature`.
+  final String? haEntityId;
 
   const TemperaturePoint({
     required this.id,
@@ -15,6 +17,7 @@ class TemperaturePoint {
     required this.maxC,
     this.active = true,
     this.photoPath,
+    this.haEntityId,
   });
 
   Map<String, Object?> toMap() => {
@@ -25,6 +28,7 @@ class TemperaturePoint {
         'max_c': maxC,
         'active': active ? 1 : 0,
         'photo_path': photoPath,
+        'ha_entity_id': haEntityId,
       };
 
   factory TemperaturePoint.fromMap(Map<String, Object?> map) => TemperaturePoint(
@@ -35,6 +39,7 @@ class TemperaturePoint {
         maxC: (map['max_c']! as num).toDouble(),
         active: (map['active'] as int? ?? 1) == 1,
         photoPath: map['photo_path'] as String?,
+        haEntityId: map['ha_entity_id'] as String?,
       );
 
   TemperaturePoint copyWith({
@@ -44,7 +49,9 @@ class TemperaturePoint {
     double? maxC,
     bool? active,
     String? photoPath,
+    String? haEntityId,
     bool clearPhoto = false,
+    bool clearHaEntity = false,
   }) =>
       TemperaturePoint(
         id: id,
@@ -54,6 +61,7 @@ class TemperaturePoint {
         maxC: maxC ?? this.maxC,
         active: active ?? this.active,
         photoPath: clearPhoto ? null : (photoPath ?? this.photoPath),
+        haEntityId: clearHaEntity ? null : (haEntityId ?? this.haEntityId),
       );
 }
 

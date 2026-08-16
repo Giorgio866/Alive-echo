@@ -79,6 +79,10 @@ class AppSettings {
   /// Formato etichetta TSPL: `40x30` | `50x30` | `50x80`.
   final String labelFormat;
   final bool onboardingCompleted;
+  /// Base URL Home Assistant, es. `http://192.168.1.10:8123`.
+  final String? homeAssistantUrl;
+  /// Long-lived access token (Profilo HA → Token di accesso).
+  final String? homeAssistantToken;
 
   const AppSettings({
     required this.activityName,
@@ -90,6 +94,8 @@ class AppSettings {
     this.printerLanguage = 'escpos',
     this.labelFormat = '50x30',
     this.onboardingCompleted = false,
+    this.homeAssistantUrl,
+    this.homeAssistantToken,
   });
 
   bool get hasPrinterConfigured =>
@@ -98,6 +104,12 @@ class AppSettings {
       (printerMode == 'bluetooth' || printerMode == 'network');
 
   bool get usesTspl => printerLanguage == 'tspl';
+
+  bool get hasHomeAssistantConfigured =>
+      homeAssistantUrl != null &&
+      homeAssistantUrl!.trim().isNotEmpty &&
+      homeAssistantToken != null &&
+      homeAssistantToken!.trim().isNotEmpty;
 
   AppSettings copyWith({
     String? activityName,
@@ -109,7 +121,10 @@ class AppSettings {
     String? printerLanguage,
     String? labelFormat,
     bool? onboardingCompleted,
+    String? homeAssistantUrl,
+    String? homeAssistantToken,
     bool clearPrinter = false,
+    bool clearHomeAssistant = false,
   }) =>
       AppSettings(
         activityName: activityName ?? this.activityName,
@@ -121,6 +136,10 @@ class AppSettings {
         printerLanguage: printerLanguage ?? this.printerLanguage,
         labelFormat: labelFormat ?? this.labelFormat,
         onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
+        homeAssistantUrl:
+            clearHomeAssistant ? null : (homeAssistantUrl ?? this.homeAssistantUrl),
+        homeAssistantToken:
+            clearHomeAssistant ? null : (homeAssistantToken ?? this.homeAssistantToken),
       );
 
   Map<String, String?> toPrefs() => {
@@ -133,6 +152,8 @@ class AppSettings {
         'printer_language': printerLanguage,
         'label_format': labelFormat,
         'onboarding_completed': onboardingCompleted ? '1' : '0',
+        'ha_url': homeAssistantUrl,
+        'ha_token': homeAssistantToken,
       };
 
   factory AppSettings.fromPrefs(Map<String, String?> prefs) {
@@ -157,6 +178,14 @@ class AppSettings {
           ? format!
           : '50x30',
       onboardingCompleted: prefs['onboarding_completed'] == '1',
+      homeAssistantUrl: _emptyToNull(prefs['ha_url']),
+      homeAssistantToken: _emptyToNull(prefs['ha_token']),
     );
+  }
+
+  static String? _emptyToNull(String? value) {
+    if (value == null) return null;
+    final t = value.trim();
+    return t.isEmpty ? null : t;
   }
 }

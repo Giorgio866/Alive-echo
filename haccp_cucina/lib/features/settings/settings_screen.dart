@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/document_models.dart';
 import '../../providers/app_providers.dart';
+import '../../services/home_assistant_service.dart';
 import '../../services/thermal_print_service.dart';
 import '../../services/vision_model_service.dart';
 import '../../theme/app_theme.dart';
@@ -20,6 +21,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _hostCtrl = TextEditingController(text: '192.168.1.130');
   final _portCtrl = TextEditingController(text: '9100');
   final _networkNameCtrl = TextEditingController(text: 'ESC/POS rete');
+  final _haUrlCtrl = TextEditingController(text: 'http://homeassistant.local:8123');
+  final _haTokenCtrl = TextEditingController();
 
   List<ThermalPrinterDevice> _devices = [];
   bool _loadingDevices = false;
@@ -30,6 +33,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _mode = 'network'; // bluetooth | network
   String _printerLanguage = 'escpos'; // escpos | tspl
   String _labelFormat = '50x30'; // 40x30 | 50x30 | 50x80
+  bool _haTesting = false;
+  bool _haTokenVisible = false;
+  String? _haStatus;
+  List<HaTemperatureSensor> _haSensors = [];
 
   @override
   void initState() {
@@ -51,10 +58,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     _printerLanguage = s.printerLanguage;
     _labelFormat = s.labelFormat;
+    if (s.homeAssistantUrl != null && s.homeAssistantUrl!.isNotEmpty) {
+      _haUrlCtrl.text = s.homeAssistantUrl!;
+    }
+    if (s.homeAssistantToken != null) {
+      _haTokenCtrl.text = s.homeAssistantToken!;
+    }
     setState(() {
-      _printerSummary = s.hasPrinterConfigured
-          ? _describe(s)
-          : null;
+      _printerSummary = s.hasPrinterConfigured ? _describe(s) : null;
+      _haStatus = s.hasHomeAssistantConfigured ? 'Configurato' : null;
     });
   }
 
@@ -74,6 +86,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _hostCtrl.dispose();
     _portCtrl.dispose();
     _networkNameCtrl.dispose();
+    _haUrlCtrl.dispose();
+    _haTokenCtrl.dispose();
     super.dispose();
   }
 
@@ -178,6 +192,118 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  Future<void> _testAndSaveHomeAssistant() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final url = _haUrlCtrl.text.trim();
+    final token = _haTokenCtrl.text.trim();
+    if (url.isEmpty || token.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('Inserisci URL e token di Home Assistant')));
+      return;
+    }
+    setState(() {
+      _haTesting = true;
+      _haStatus = 'Connessione…';
+    });
+    try {
+      final sensors = await ref.read(homeAssistantServiceProvider).listTemperatureSensors(
+            baseUrl: url,
+            token: token,
+          );
+      final current = await ref.read(settingsServiceProvider).load();
+      await ref.read(settingsServiceProvider).save(
+            current.copyWith(
+              homeAssistantUrl: HomeAssistantService.normalizeBaseUrl(url),
+              homeAssistantToken: token,
+            ),
+          );
+      ref.invalidate(settingsProvider);
+      if (!mounted) return;
+      setState(() {
+        _haSensors = sensors;
+        _haStatus = sensors.isEmpty
+            ? 'Connesso, ma nessun sensore temperatura. In HA il device_class deve essere temperature.'
+            : 'Connesso: ${sensors.length} sensori temperatura (Zigbee/MQTT)';
+      });
+      messenger.showSnackBar(
+        SnackBar(content: Text('Home Assistant OK · ${sensors.length} termometri')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _haStatus = '$e');
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _haTesting = false);
+    }
+  }
+
+  Widget _haFridgeMapping() {
+    final pointsAsync = ref.watch(temperaturePointsProvider);
+    return pointsAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: LinearProgressIndicator(),
+      ),
+      error: (e, _) => Text('$e'),
+      data: (points) {
+        if (points.isEmpty) {
+          return const Text('Nessun frigo in app: completa prima il setup temperature.');
+        }
+        return Column(
+          children: [
+            for (final point in points)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: DropdownButtonFormField<String>(
+                  value: () {
+                    final id = point.haEntityId;
+                    if (id == null || id.isEmpty) return '';
+                    if (_haSensors.any((s) => s.entityId == id)) return id;
+                    return id;
+                  }(),
+                  isExpanded: true,
+                  decoration: InputDecoration(labelText: point.name),
+                  items: [
+                    const DropdownMenuItem<String>(
+                      value: '',
+                      child: Text('— non collegato —'),
+                    ),
+                    if (point.haEntityId != null &&
+                        point.haEntityId!.isNotEmpty &&
+                        !_haSensors.any((s) => s.entityId == point.haEntityId))
+                      DropdownMenuItem<String>(
+                        value: point.haEntityId,
+                        child: Text('${point.haEntityId} (non in elenco)'),
+                      ),
+                    ..._haSensors.map(
+                      (s) => DropdownMenuItem<String>(
+                        value: s.entityId,
+                        child: Text(
+                          s.hasValue
+                              ? '${s.name}  (${s.valueC!.toStringAsFixed(1)} °C)'
+                              : '${s.name}  (n/d)',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) async {
+                    final entity = (v == null || v.isEmpty) ? null : v;
+                    await ref.read(haccpRepositoryProvider).upsertTemperaturePoint(
+                          point.copyWith(
+                            haEntityId: entity,
+                            clearHaEntity: entity == null,
+                          ),
+                        );
+                    ref.invalidate(temperaturePointsProvider);
+                  },
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final printer = ref.watch(thermalPrintServiceProvider);
@@ -225,6 +351,78 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
             child: const Text('Salva attività'),
           ),
+          const SizedBox(height: 28),
+          Text('Home Assistant / Zigbee', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+          Text(
+            'Se i termometri Zigbee sono già in Home Assistant, collegali qui. '
+            'Il telefono deve essere sulla stessa WiFi. '
+            'Token: HA → il tuo profilo → Token di accesso a lunga durata.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _haUrlCtrl,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'URL Home Assistant',
+              hintText: 'http://192.168.1.10:8123',
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _haTokenCtrl,
+            obscureText: !_haTokenVisible,
+            decoration: InputDecoration(
+              labelText: 'Token di accesso',
+              suffixIcon: IconButton(
+                tooltip: _haTokenVisible ? 'Nascondi' : 'Mostra',
+                onPressed: () => setState(() => _haTokenVisible = !_haTokenVisible),
+                icon: Icon(_haTokenVisible ? Icons.visibility_off : Icons.visibility),
+              ),
+            ),
+          ),
+          if (_haStatus != null) ...[
+            const SizedBox(height: 8),
+            Text(_haStatus!, style: Theme.of(context).textTheme.bodySmall),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: _haTesting ? null : _testAndSaveHomeAssistant,
+                icon: _haTesting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.sensors),
+                label: Text(_haTesting ? 'Connessione…' : 'Prova e salva'),
+              ),
+              OutlinedButton(
+                onPressed: () async {
+                  final current = await ref.read(settingsServiceProvider).load();
+                  await ref.read(settingsServiceProvider).save(current.copyWith(clearHomeAssistant: true));
+                  ref.invalidate(settingsProvider);
+                  _haTokenCtrl.clear();
+                  setState(() {
+                    _haStatus = null;
+                    _haSensors = [];
+                  });
+                },
+                child: const Text('Scollega'),
+              ),
+            ],
+          ),
+          if (_haSensors.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('Collega ogni frigo a un sensore', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            _haFridgeMapping(),
+          ],
           const SizedBox(height: 28),
           Text('Stampante etichette', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 6),

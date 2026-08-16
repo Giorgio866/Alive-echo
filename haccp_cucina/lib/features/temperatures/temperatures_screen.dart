@@ -48,6 +48,16 @@ class TemperaturesScreen extends ConsumerWidget {
             onPressed: () => context.push('/temperature-history'),
             icon: const Icon(Icons.history),
           ),
+          if (settings.value?.hasHomeAssistantConfigured == true)
+            IconButton(
+              tooltip: 'Leggi da Home Assistant (Zigbee)',
+              onPressed: () => _importFromHomeAssistant(
+                context,
+                ref,
+                settings.value?.defaultOperator ?? 'Operatore',
+              ),
+              icon: const Icon(Icons.sensors),
+            ),
         ],
       ),
       floatingActionButton: Column(
@@ -159,7 +169,8 @@ class TemperaturesScreen extends ConsumerWidget {
                               const SizedBox(height: 2),
                               Text(
                                 '${point.zone == 'freezer' ? 'congelatore' : 'frigo'} · '
-                                '${point.minC.toStringAsFixed(0)} / ${point.maxC.toStringAsFixed(0)} °C',
+                                '${point.minC.toStringAsFixed(0)} / ${point.maxC.toStringAsFixed(0)} °C'
+                                '${point.haEntityId != null ? ' · Zigbee' : ''}',
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: AppColors.slateMuted,
                                     ),
@@ -205,6 +216,77 @@ class TemperaturesScreen extends ConsumerWidget {
   bool _isToday(DateTime dt) {
     final now = DateTime.now();
     return dt.year == now.year && dt.month == now.month && dt.day == now.day;
+  }
+
+  Future<void> _importFromHomeAssistant(
+    BuildContext context,
+    WidgetRef ref,
+    String operatorName,
+  ) async {
+    final settings = await ref.read(settingsServiceProvider).load();
+    if (!settings.hasHomeAssistantConfigured) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Configura Home Assistant in Impostazioni')),
+        );
+      }
+      return;
+    }
+    final points = await ref.read(haccpRepositoryProvider).getTemperaturePoints();
+    final linked = points.where((p) => (p.haEntityId ?? '').isNotEmpty).toList();
+    if (linked.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Collega i frigo ai sensori in Impostazioni → Home Assistant / Zigbee'),
+          ),
+        );
+      }
+      return;
+    }
+
+    var ok = 0;
+    var fail = 0;
+    String? lastError;
+    for (final point in linked) {
+      try {
+        final sensor = await ref.read(homeAssistantServiceProvider).getSensor(
+              baseUrl: settings.homeAssistantUrl!,
+              token: settings.homeAssistantToken!,
+              entityId: point.haEntityId!,
+            );
+        if (!sensor.hasValue) {
+          fail++;
+          lastError = '${point.name}: non disponibile';
+          continue;
+        }
+        await ref.read(haccpRepositoryProvider).addTemperatureReading(
+              pointId: point.id,
+              valueC: sensor.valueC!,
+              operatorName: operatorName,
+              note: 'Home Assistant Zigbee (${sensor.entityId})',
+              minC: point.minC,
+              maxC: point.maxC,
+            );
+        ok++;
+      } catch (e) {
+        fail++;
+        lastError = '$e';
+      }
+    }
+    ref.invalidate(dashboardProvider);
+    ref.invalidate(latestReadingsProvider);
+    ref.invalidate(temperatureHistoryProvider);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          fail == 0
+              ? 'Importate $ok temperature da Home Assistant'
+              : 'Importate $ok, errori $fail${lastError != null ? ' · $lastError' : ''}',
+        ),
+      ),
+    );
   }
 
   Future<void> _changeFridgePhoto(BuildContext context, WidgetRef ref, TemperaturePoint point) async {
@@ -366,6 +448,43 @@ class TemperaturesScreen extends ConsumerWidget {
                       icon: Icon(proofPhoto == null ? Icons.photo_camera : Icons.cameraswitch),
                       label: Text(proofPhoto == null ? 'Scatta foto termometro' : 'Scatta di nuovo'),
                     ),
+                    if (selected.haEntityId != null) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final s = await ref.read(settingsServiceProvider).load();
+                          if (!s.hasHomeAssistantConfigured) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Configura Home Assistant in Impostazioni')),
+                              );
+                            }
+                            return;
+                          }
+                          try {
+                            final sensor = await ref.read(homeAssistantServiceProvider).getSensor(
+                                  baseUrl: s.homeAssistantUrl!,
+                                  token: s.homeAssistantToken!,
+                                  entityId: selected.haEntityId!,
+                                );
+                            if (!sensor.hasValue) {
+                              throw StateError('Sensore ${sensor.name} non disponibile');
+                            }
+                            valueCtrl.text = sensor.valueC!.toStringAsFixed(1);
+                            if (noteCtrl.text.trim().isEmpty) {
+                              noteCtrl.text = 'Home Assistant Zigbee (${sensor.entityId})';
+                            }
+                            setLocal(() {});
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.sensors),
+                        label: const Text('Leggi da Zigbee / Home Assistant'),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () async {

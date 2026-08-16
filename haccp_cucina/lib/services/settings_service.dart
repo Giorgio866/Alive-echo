@@ -15,6 +15,8 @@ class SettingsService {
       'printer_language': prefs.getString('printer_language'),
       'label_format': prefs.getString('label_format'),
       'onboarding_completed': prefs.getString('onboarding_completed'),
+      'ha_url': prefs.getString('ha_url'),
+      'ha_token': prefs.getString('ha_token'),
     });
   }
 
@@ -28,6 +30,17 @@ class SettingsService {
     );
     await prefs.setString('printer_language', settings.printerLanguage);
     await prefs.setString('label_format', settings.labelFormat);
+
+    if (settings.homeAssistantUrl != null && settings.homeAssistantUrl!.trim().isNotEmpty) {
+      await prefs.setString('ha_url', settings.homeAssistantUrl!.trim());
+    } else {
+      await prefs.remove('ha_url');
+    }
+    if (settings.homeAssistantToken != null && settings.homeAssistantToken!.trim().isNotEmpty) {
+      await prefs.setString('ha_token', settings.homeAssistantToken!.trim());
+    } else {
+      await prefs.remove('ha_token');
+    }
 
     if (settings.printerMode != null) {
       await prefs.setString('printer_mode', settings.printerMode!);

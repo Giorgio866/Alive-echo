@@ -35,7 +35,7 @@ class AppDatabase {
     final path = p.join(databasesPath, 'haccp_cucina.db');
     final db = await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);
@@ -54,6 +54,9 @@ class AppDatabase {
         if (oldVersion < 5) {
           await _tryAddColumn(db, 'product_lots', 'depleted INTEGER NOT NULL DEFAULT 0');
           await _tryAddColumn(db, 'product_lots', 'depleted_at TEXT');
+        }
+        if (oldVersion < 6) {
+          await _tryAddColumn(db, 'temperature_points', 'ha_entity_id TEXT');
         }
       },
     );
@@ -95,7 +98,8 @@ class AppDatabase {
         min_c REAL NOT NULL,
         max_c REAL NOT NULL,
         active INTEGER NOT NULL DEFAULT 1,
-        photo_path TEXT
+        photo_path TEXT,
+        ha_entity_id TEXT
       )
     ''');
     await db.execute('''
@@ -289,7 +293,7 @@ class AppDatabase {
   static Future<Database> openInMemory() async {
     final db = await openDatabase(
       inMemoryDatabasePath,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await _createSchema(db);
         await _seed(db);
