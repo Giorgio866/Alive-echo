@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OmniVoice per PC</title>
+    <style>
+        :root {
+            --bg: #0b1020;
+            --card: #151b2e;
+            --text: #f4f6fb;
+            --muted: #a7b0c4;
+            --accent: #5ee0a0;
+            --accent-dark: #2f9e6a;
+            --line: #2a3350;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background:
+                radial-gradient(circle at top right, #1d3a5c 0, transparent 40%),
+                radial-gradient(circle at bottom left, #163528 0, transparent 35%),
+                var(--bg);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 16px;
+        }
+        main {
+            width: min(640px, 100%);
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            padding: 36px 32px 28px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 2rem;
+            letter-spacing: -0.03em;
+        }
+        .badge {
+            display: inline-block;
+            margin-bottom: 16px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #1e2a22;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        p { color: var(--muted); line-height: 1.55; }
+        .download {
+            display: block;
+            width: 100%;
+            margin: 24px 0 12px;
+            padding: 18px 20px;
+            border: none;
+            border-radius: 14px;
+            background: linear-gradient(180deg, var(--accent), var(--accent-dark));
+            color: #062014;
+            font-size: 1.15rem;
+            font-weight: 800;
+            text-align: center;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .download:hover { filter: brightness(1.06); }
+        .alt {
+            display: block;
+            text-align: center;
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin-bottom: 24px;
+        }
+        .alt a { color: var(--accent); }
+        ol {
+            margin: 0;
+            padding-left: 20px;
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .note {
+            margin-top: 22px;
+            padding: 14px 16px;
+            border-radius: 12px;
+            background: #101628;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+        code {
+            color: #d7e3ff;
+            font-size: 0.88em;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="badge">Windows 10 / 11 · 64 bit</div>
+        <h1>OmniVoice sul PC</h1>
+        <p>
+            OmniVoice (ora si chiama <strong>VoiceStudio</strong>) è l’app per Windows
+            per clonare voci, dettare, doppiare e creare audio in italiano e in
+            centinaia di altre lingue. Funziona sul computer, senza abbonamento.
+        </p>
+
+        <a class="download"
+           href="https://github.com/debpalash/VoiceStudio/releases/download/v0.5.0/VoiceStudio_0.5.0_x64_en-US.msi">
+            Scarica OmniVoice per Windows
+        </a>
+        <div class="alt">
+            File ufficiale: <code>VoiceStudio_0.5.0_x64_en-US.msi</code>
+            · circa 160 MB
+        </div>
+
+        <ol>
+            <li>Scarica il file con il pulsante verde.</li>
+            <li>Aprilo e completa l’installazione (Avanti / Next).</li>
+            <li>Nel menu Start cerca <strong>VoiceStudio</strong> oppure <strong>OmniVoice</strong>.</li>
+        </ol>
+
+        <p class="note">
+            Serve circa <strong>10 GB liberi</strong> sul disco: al primo avvio
+            l’app scarica i modelli vocali. La scheda video NVIDIA è utile ma
+            non obbligatoria (senza GPU è più lento).
+            <br><br>
+            Se preferisci l’installazione automatica, scarica anche
+            <a href="Installa-OmniVoice.bat">Installa-OmniVoice.bat</a>
+            e
+            <a href="Installa-OmniVoice.ps1">Installa-OmniVoice.ps1</a>
+            nella stessa cartella, poi fai doppio clic sul file <code>.bat</code>.
+        </p>
+    </main>
+</body>
+</html>
