@@ -7,8 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../data/models/document_models.dart';
 import '../../data/models/temperature_models.dart';
 import '../../providers/app_providers.dart';
+import '../../services/home_assistant_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -111,11 +113,14 @@ class TemperaturesScreen extends ConsumerWidget {
             );
           }
           return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            itemCount: points.length,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
+            itemCount: points.length + 1,
             separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
-              final point = points[index];
+              if (index == 0) {
+                return _zigbeeHelpBanner(context, settings.value);
+              }
+              final point = points[index - 1];
               final reading = latest[point.id];
               final isToday = reading != null && _isToday(reading.recordedAt);
               final tone = reading == null || !isToday
@@ -132,64 +137,87 @@ class TemperaturesScreen extends ConsumerWidget {
               return Material(
                 color: AppColors.surfaceElevated,
                 borderRadius: BorderRadius.circular(16),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => _showReadingSheet(
-                    context,
-                    ref,
-                    point,
-                    settings.value?.defaultOperator ?? 'Operatore',
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.slate.withValues(alpha: 0.08)),
                   ),
-                  onLongPress: () => _changeFridgePhoto(context, ref, point),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.slate.withValues(alpha: 0.08)),
-                    ),
-                    child: Row(
-                      children: [
-                        GestureDetector(
-                          onTap: () => _changeFridgePhoto(context, ref, point),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: SizedBox(
-                              width: 72,
-                              height: 72,
-                              child: _fridgeThumb(point),
-                            ),
-                          ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      InkWell(
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                        onTap: () => _showReadingSheet(
+                          context,
+                          ref,
+                          point,
+                          settings.value?.defaultOperator ?? 'Operatore',
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        onLongPress: () => _changeFridgePhoto(context, ref, point),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                          child: Row(
                             children: [
-                              Text(point.name, style: Theme.of(context).textTheme.titleMedium),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${point.zone == 'freezer' ? 'congelatore' : 'frigo'} · '
-                                '${point.minC.toStringAsFixed(0)} / ${point.maxC.toStringAsFixed(0)} °C'
-                                '${point.haEntityId != null ? ' · Zigbee' : ''}',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.slateMuted,
-                                    ),
-                              ),
-                              if (reading != null) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Ultima: ${reading.valueC.toStringAsFixed(1)} °C · '
-                                  '${DateFormat('HH:mm').format(reading.recordedAt)}'
-                                  '${reading.photoPath != null ? ' · 📷' : ''}',
-                                  style: Theme.of(context).textTheme.bodySmall,
+                              GestureDetector(
+                                onTap: () => _changeFridgePhoto(context, ref, point),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: SizedBox(
+                                    width: 72,
+                                    height: 72,
+                                    child: _fridgeThumb(point),
+                                  ),
                                 ),
-                              ],
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(point.name, style: Theme.of(context).textTheme.titleMedium),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${point.zone == 'freezer' ? 'congelatore' : 'frigo'} · '
+                                      '${point.minC.toStringAsFixed(0)} / ${point.maxC.toStringAsFixed(0)} °C'
+                                      '${point.haEntityId != null ? ' · Zigbee' : ''}',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            color: AppColors.slateMuted,
+                                          ),
+                                    ),
+                                    if (reading != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Ultima: ${reading.valueC.toStringAsFixed(1)} °C · '
+                                        '${DateFormat('HH:mm').format(reading.recordedAt)}'
+                                        '${reading.photoPath != null ? ' · 📷' : ''}',
+                                        style: Theme.of(context).textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              StatusBadge(label: statusLabel, tone: tone),
                             ],
                           ),
                         ),
-                        StatusBadge(label: statusLabel, tone: tone),
-                      ],
-                    ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => _abbinaSensore(context, ref, point),
+                            icon: Icon(
+                              (point.haEntityId ?? '').isEmpty ? Icons.link : Icons.sensors,
+                              size: 18,
+                            ),
+                            label: Text(
+                              (point.haEntityId ?? '').isEmpty ? 'Abbina Zigbee' : 'Cambia Zigbee',
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -197,6 +225,166 @@ class TemperaturesScreen extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+
+  Widget _zigbeeHelpBanner(BuildContext context, AppSettings? settings) {
+    final ha = settings?.hasHomeAssistantConfigured == true;
+    return Material(
+      color: AppColors.tealSoft,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              ha
+                  ? 'Zigbee con Nabu Casa (anche da 4G, non serve la stessa WiFi)'
+                  : 'Termometri Zigbee: collega Home Assistant Cloud',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              ha
+                  ? 'Su ogni frigo tocca Abbina Zigbee e scegli il sensore. '
+                      'Poi l\'icona dei sensori in alto per scrivere le temperature HACCP.'
+                  : 'Impostazioni → incolla l\'URL https://xxxx.ui.nabu.casa e il token, '
+                      'poi Prova e salva. Non serve essere sulla stessa WiFi.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+            ),
+            if (!ha)
+              TextButton(
+                onPressed: () => context.push('/settings'),
+                child: const Text('Apri Impostazioni'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _abbinaSensore(
+    BuildContext context,
+    WidgetRef ref,
+    TemperaturePoint point,
+  ) async {
+    final settings = await ref.read(settingsServiceProvider).load();
+    if (!settings.hasHomeAssistantConfigured) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Prima: Impostazioni → URL Nabu Casa + token, poi Prova e salva'),
+        ),
+      );
+      context.push('/settings');
+      return;
+    }
+
+    final future = ref.read(homeAssistantServiceProvider).listTemperatureSensors(
+          baseUrl: settings.homeAssistantUrl!,
+          token: settings.homeAssistantToken!,
+        );
+    if (!context.mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.7,
+            child: FutureBuilder<List<HaTemperatureSensor>>(
+              future: future,
+              builder: (context, snap) {
+                if (snap.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text('Non raggiungo Home Assistant: ${snap.error}'),
+                  );
+                }
+                final sensors = snap.data ?? [];
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                      child: Text(
+                        'Abbina ${point.name}',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Text(
+                        'Scegli il termometro Zigbee di questo frigo. '
+                        'Nabu Casa funziona anche se il telefono non è sulla stessa WiFi.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.slateMuted,
+                            ),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.link_off),
+                            title: const Text('Non collegato'),
+                            selected: (point.haEntityId ?? '').isEmpty,
+                            onTap: () async {
+                              await ref.read(haccpRepositoryProvider).upsertTemperaturePoint(
+                                    point.copyWith(clearHaEntity: true),
+                                  );
+                              ref.invalidate(temperaturePointsProvider);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                          ),
+                          if (sensors.isEmpty)
+                            const ListTile(
+                              title: Text('Nessun termometro trovato'),
+                              subtitle: Text(
+                                'In Home Assistant il device_class deve essere temperature.',
+                              ),
+                            ),
+                          ...sensors.map((s) {
+                            final selected = s.entityId == point.haEntityId;
+                            return ListTile(
+                              leading: Icon(selected ? Icons.sensors : Icons.sensors_outlined),
+                              title: Text(s.name),
+                              subtitle: Text(
+                                s.hasValue
+                                    ? '${s.valueC!.toStringAsFixed(1)} °C · ${s.entityId}'
+                                    : 'n/d · ${s.entityId}',
+                              ),
+                              selected: selected,
+                              onTap: () async {
+                                await ref.read(haccpRepositoryProvider).upsertTemperaturePoint(
+                                      point.copyWith(haEntityId: s.entityId),
+                                    );
+                                ref.invalidate(temperaturePointsProvider);
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('${point.name} → ${s.name}')),
+                                  );
+                                }
+                              },
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -238,7 +426,7 @@ class TemperaturesScreen extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Collega i frigo ai sensori in Impostazioni → Home Assistant / Zigbee'),
+            content: Text('Prima tocca Abbina Zigbee su ogni frigo, poi riprova'),
           ),
         );
       }
@@ -448,8 +636,8 @@ class TemperaturesScreen extends ConsumerWidget {
                       icon: Icon(proofPhoto == null ? Icons.photo_camera : Icons.cameraswitch),
                       label: Text(proofPhoto == null ? 'Scatta foto termometro' : 'Scatta di nuovo'),
                     ),
-                    if (selected.haEntityId != null) ...[
-                      const SizedBox(height: 8),
+                    const SizedBox(height: 8),
+                    if (selected.haEntityId != null)
                       OutlinedButton.icon(
                         onPressed: () async {
                           final s = await ref.read(settingsServiceProvider).load();
@@ -483,8 +671,16 @@ class TemperaturesScreen extends ConsumerWidget {
                         },
                         icon: const Icon(Icons.sensors),
                         label: const Text('Leggi da Zigbee / Home Assistant'),
+                      )
+                    else
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          await _abbinaSensore(context, ref, selected);
+                        },
+                        icon: const Icon(Icons.link),
+                        label: const Text('Abbina Zigbee'),
                       ),
-                    ],
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () async {

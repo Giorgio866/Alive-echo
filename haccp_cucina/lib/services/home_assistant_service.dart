@@ -30,8 +30,22 @@ class HomeAssistantService {
   static String normalizeBaseUrl(String raw) {
     var s = raw.trim();
     if (s.isEmpty) return s;
+
+    final lower = s.toLowerCase();
+    final isNabu = lower.contains('nabu.casa');
+    final isLocalIp = RegExp(r'(?:^|://)(\d{1,3}\.){3}\d{1,3}(?::\d+)?').hasMatch(lower) ||
+        lower.contains('.local');
+
     if (!s.startsWith('http://') && !s.startsWith('https://')) {
-      s = 'http://$s';
+      s = (isNabu || !isLocalIp) ? 'https://$s' : 'http://$s';
+    }
+    if (isNabu && s.startsWith('http://')) {
+      s = 'https://${s.substring('http://'.length)}';
+    }
+
+    final uri = Uri.tryParse(s);
+    if (uri != null && uri.host.isNotEmpty) {
+      return uri.origin;
     }
     while (s.endsWith('/')) {
       s = s.substring(0, s.length - 1);
@@ -80,12 +94,13 @@ class HomeAssistantService {
               'Content-Type': 'application/json',
             },
           )
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 20));
     } on FormatException {
       throw StateError('URL Home Assistant non valido');
     } catch (e) {
       throw StateError(
-        'Non raggiungo Home Assistant. Controlla WiFi, URL e che il telefono sia in LAN. ($e)',
+        'Non raggiungo Home Assistant. Usa l\'URL Nabu Casa '
+        '(https://XXXX.ui.nabu.casa), senza percorso tipo /lovelace. ($e)',
       );
     }
     if (res.statusCode == 401 || res.statusCode == 403) {

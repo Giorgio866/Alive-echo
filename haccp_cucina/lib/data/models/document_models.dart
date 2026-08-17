@@ -79,7 +79,7 @@ class AppSettings {
   /// Formato etichetta TSPL: `40x30` | `50x30` | `50x80`.
   final String labelFormat;
   final bool onboardingCompleted;
-  /// Base URL Home Assistant, es. `http://192.168.1.10:8123`.
+  /// Base URL Home Assistant, es. `https://xxxx.ui.nabu.casa` oppure LAN.
   final String? homeAssistantUrl;
   /// Long-lived access token (Profilo HA → Token di accesso).
   final String? homeAssistantToken;

@@ -13,6 +13,21 @@ void main() {
     );
   });
 
+  test('normalizeBaseUrl Nabu Casa usa https e toglie /lovelace', () {
+    expect(
+      HomeAssistantService.normalizeBaseUrl('https://xxxx.ui.nabu.casa/lovelace/0'),
+      'https://xxxx.ui.nabu.casa',
+    );
+    expect(
+      HomeAssistantService.normalizeBaseUrl('xxxx.ui.nabu.casa'),
+      'https://xxxx.ui.nabu.casa',
+    );
+    expect(
+      HomeAssistantService.normalizeBaseUrl('http://xxxx.ui.nabu.casa'),
+      'https://xxxx.ui.nabu.casa',
+    );
+  });
+
   test('parseStates tiene solo sensori temperatura Zigbee', () {
     final sensors = HomeAssistantService.parseStates([
       {

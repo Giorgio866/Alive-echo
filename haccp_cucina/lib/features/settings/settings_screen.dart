@@ -21,7 +21,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _hostCtrl = TextEditingController(text: '192.168.1.130');
   final _portCtrl = TextEditingController(text: '9100');
   final _networkNameCtrl = TextEditingController(text: 'ESC/POS rete');
-  final _haUrlCtrl = TextEditingController(text: 'http://homeassistant.local:8123');
+  final _haUrlCtrl = TextEditingController();
   final _haTokenCtrl = TextEditingController();
 
   List<ThermalPrinterDevice> _devices = [];
@@ -66,8 +66,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     setState(() {
       _printerSummary = s.hasPrinterConfigured ? _describe(s) : null;
-      _haStatus = s.hasHomeAssistantConfigured ? 'Configurato' : null;
+      _haStatus = s.hasHomeAssistantConfigured ? 'Configurato (Nabu Casa / remoto)' : null;
     });
+    if (s.hasHomeAssistantConfigured) {
+      try {
+        final sensors = await ref.read(homeAssistantServiceProvider).listTemperatureSensors(
+              baseUrl: s.homeAssistantUrl!,
+              token: s.homeAssistantToken!,
+            );
+        if (!mounted) return;
+        setState(() {
+          _haSensors = sensors;
+          _haStatus = 'Connesso: ${sensors.length} termometri. Abbina ogni frigo qui sotto.';
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _haStatus = 'Salvato, ma ora non raggiungo HA: $e');
+      }
+    }
   }
 
   String _describe(AppSettings s) {
@@ -218,6 +234,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           );
       ref.invalidate(settingsProvider);
       if (!mounted) return;
+      _haUrlCtrl.text = HomeAssistantService.normalizeBaseUrl(url);
       setState(() {
         _haSensors = sensors;
         _haStatus = sensors.isEmpty
@@ -355,9 +372,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Text('Home Assistant / Zigbee', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 6),
           Text(
-            'Se i termometri Zigbee sono già in Home Assistant, collegali qui. '
-            'Il telefono deve essere sulla stessa WiFi. '
-            'Token: HA → il tuo profilo → Token di accesso a lunga durata.',
+            'Funziona con Nabu Casa anche da 4G o da un\'altra WiFi: non serve la stessa rete di casa.\n'
+            '1) Incolla l\'URL remoto, tipo https://xxxx.ui.nabu.casa (senza /lovelace).\n'
+            '2) Token: in HA tocca la foto profilo in basso a sinistra → '
+            'Token di accesso a lunga durata → Crea token.\n'
+            '3) Prova e salva, poi abbina ogni frigo al suo termometro (qui sotto o in Temperature → Abbina Zigbee).',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
           ),
           const SizedBox(height: 12),
@@ -365,8 +384,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             controller: _haUrlCtrl,
             keyboardType: TextInputType.url,
             decoration: const InputDecoration(
-              labelText: 'URL Home Assistant',
-              hintText: 'http://192.168.1.10:8123',
+              labelText: 'URL Nabu Casa',
+              hintText: 'https://xxxx.ui.nabu.casa',
+              helperText: 'Senza /lovelace e senza slash finale',
             ),
           ),
           const SizedBox(height: 10),
@@ -419,9 +439,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           if (_haSensors.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('Collega ogni frigo a un sensore', style: Theme.of(context).textTheme.titleMedium),
+            Text('4) Abbina: Frigo 1 → il suo termometro Zigbee', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'Apri il menu a tendina di ogni frigo e scegli il sensore (si vede anche la temperatura attuale). '
+              'Puoi abbinare anche da Temperature → Abbina Zigbee.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+            ),
             const SizedBox(height: 8),
             _haFridgeMapping(),
+          ] else if ((_haUrlCtrl.text.trim().isNotEmpty && _haTokenCtrl.text.trim().isNotEmpty) &&
+              !_haTesting) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Dopo Prova e salva comparirà qui l\'elenco dei termometri da abbinare a ogni frigo.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.slateMuted),
+            ),
           ],
           const SizedBox(height: 28),
           Text('Stampante etichette', style: Theme.of(context).textTheme.titleLarge),
